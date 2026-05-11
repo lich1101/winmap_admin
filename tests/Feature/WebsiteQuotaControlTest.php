@@ -3,12 +3,14 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\DrupalAuthenticationService;
 use App\Services\DrupalSiteDiscoveryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\File;
+use Mockery;
 use Tests\TestCase;
 
 class WebsiteQuotaControlTest extends TestCase
@@ -88,5 +90,62 @@ class WebsiteQuotaControlTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('user.email', 'admin@example.com');
+    }
+
+    public function test_login_uses_drupal_administrator_when_drupal_auth_is_configured(): void
+    {
+        $mock = Mockery::mock(DrupalAuthenticationService::class);
+        $mock->shouldReceive('isConfigured')->once()->andReturn(true);
+        $mock->shouldReceive('authenticateAdministrator')->once()->with('administrator', 'secret-123')->andReturn([
+            'drupal_uid' => 1,
+            'name' => 'administrator',
+            'email' => 'admin@drupal.local',
+            'site_key' => 'enter.winmap.vn',
+        ]);
+        $mock->shouldReceive('upsertShadowAdministrator')->once()->andReturnUsing(function (array $identity): User {
+            return User::factory()->create([
+                'name' => $identity['name'],
+                'email' => $identity['email'],
+                'role' => 'administrator',
+                'is_active' => true,
+                'auth_source' => 'drupal',
+                'drupal_uid' => $identity['drupal_uid'],
+                'drupal_site' => $identity['site_key'],
+            ]);
+        });
+        $this->app->instance(DrupalAuthenticationService::class, $mock);
+
+        $response = $this->postJson('/api/login', [
+            'account' => 'administrator',
+            'password' => 'secret-123',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('user.auth_source', 'drupal')
+            ->assertJsonPath('user.drupal_uid', 1);
+    }
+
+    public function test_local_password_is_not_used_when_drupal_auth_is_configured(): void
+    {
+        User::factory()->create([
+            'name' => 'Administrator',
+            'email' => 'admin@example.com',
+            'password' => Hash::make('secret-123'),
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $mock = Mockery::mock(DrupalAuthenticationService::class);
+        $mock->shouldReceive('isConfigured')->once()->andReturn(true);
+        $mock->shouldReceive('authenticateAdministrator')->once()->with('administrator', 'secret-123')->andReturn(null);
+        $this->app->instance(DrupalAuthenticationService::class, $mock);
+
+        $response = $this->postJson('/api/login', [
+            'account' => 'administrator',
+            'password' => 'secret-123',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors('account');
     }
 }

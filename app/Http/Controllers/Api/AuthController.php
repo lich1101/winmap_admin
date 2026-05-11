@@ -4,14 +4,21 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\User;
 use App\Http\Controllers\Controller;
+use App\Services\DrupalAuthenticationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class AuthController extends Controller
 {
+    public function __construct(
+        private readonly DrupalAuthenticationService $drupalAuthentication,
+    ) {
+    }
+
     public function login(Request $request): JsonResponse
     {
         $credentials = $request->validate([
@@ -21,6 +28,27 @@ class AuthController extends Controller
 
         $account = trim((string) $credentials['account']);
         $password = (string) $credentials['password'];
+
+        if ($this->drupalAuthentication->isConfigured()) {
+            try {
+                $identity = $this->drupalAuthentication->authenticateAdministrator($account, $password);
+            } catch (Throwable $exception) {
+                report($exception);
+                abort(503, 'Không thể kết nối hệ thống xác thực Drupal.');
+            }
+
+            if (! $identity) {
+                throw ValidationException::withMessages([
+                    'account' => 'Tài khoản Drupal không đúng, không hoạt động, hoặc chưa có quyền administrator.',
+                ]);
+            }
+
+            $user = $this->drupalAuthentication->upsertShadowAdministrator($identity);
+            Auth::login($user, true);
+            $request->session()->regenerate();
+
+            return response()->json(['user' => $request->user() ?: $user]);
+        }
 
         $user = User::query()
             ->whereRaw('LOWER(email) = ?', [mb_strtolower($account)])

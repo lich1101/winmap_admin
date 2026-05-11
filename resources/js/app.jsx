@@ -106,7 +106,7 @@ function LoginScreen({ onLogin }) {
       <section className="login-card">
         <div className="brand-mark"><ShieldCheck size={30} /></div>
         <h1>Winmap Admin</h1>
-        <p>Chỉ tài khoản có role <strong>administrator</strong> mới được vào màn kiểm soát dung lượng và terminal.</p>
+        <p>Chỉ tài khoản Drupal có quyền <strong>administrator</strong> mới được vào màn kiểm soát dung lượng và terminal.</p>
         <form onSubmit={submit} className="login-form">
           <label>
             Tài khoản administrator

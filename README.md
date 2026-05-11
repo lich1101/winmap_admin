@@ -52,13 +52,51 @@ DB_USERNAME=root
 DB_PASSWORD=
 ```
 
-Configure the first admin account:
+Configure the fallback local admin account:
 
 ```env
 ADMIN_NAME="Administrator"
 ADMIN_EMAIL=admin@winmap.local
 ADMIN_PASSWORD=change-this-password
 ```
+
+If you want this panel to use the real Drupal administrator account and your multisite root is already in `DRUPAL_DISCOVERY_ROOTS`, the minimum config is:
+
+```env
+DRUPAL_AUTH_SITE_KEY="enter.winmap.vn"
+```
+
+The service will try to resolve one of these automatically:
+
+- `sites/enter.winmap.vn/settings.php`
+- alias from `sites/sites.php`
+- `sites/default/settings.php` as a final fallback
+
+If you want to pin the exact Drupal site, point it directly to `settings.php`:
+
+```env
+DRUPAL_AUTH_SETTINGS_PATH="/var/www/winmap/sites/enter.winmap.vn/settings.php"
+DRUPAL_AUTH_SITE_KEY="enter.winmap.vn"
+```
+
+Or configure the Drupal auth database directly:
+
+```env
+DRUPAL_AUTH_DB_HOST=127.0.0.1
+DRUPAL_AUTH_DB_PORT=3306
+DRUPAL_AUTH_DB_DATABASE=drupal_database
+DRUPAL_AUTH_DB_USERNAME=drupal_user
+DRUPAL_AUTH_DB_PASSWORD=secret
+DRUPAL_AUTH_DB_PREFIX=
+DRUPAL_AUTH_PASSWORD_INC_PATH="/var/www/winmap/includes/password.inc"
+```
+
+When `DRUPAL_AUTH_SETTINGS_PATH` or `DRUPAL_AUTH_DB_DATABASE` is configured, login uses the Drupal `users` table and checks the same administrator rule as the Drupal web:
+
+- `uid = 1`, or
+- the user has the Drupal permission `administer users`
+
+The local Laravel administrator remains only as a fallback for development or bootstrap when Drupal auth is not configured.
 
 Configure Drupal multisite discovery:
 
@@ -68,7 +106,7 @@ DRUPAL_SITE_SCHEME=https
 DEFAULT_WARNING_THRESHOLD_PERCENT=85
 ```
 
-Run migrations and seed the administrator:
+Run migrations and seed the fallback administrator:
 
 ```bash
 php artisan migrate --seed
