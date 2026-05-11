@@ -81,7 +81,7 @@ function FullPageLoader() {
 }
 
 function LoginScreen({ onLogin }) {
-  const [email, setEmail] = useState('');
+  const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -92,7 +92,7 @@ function LoginScreen({ onLogin }) {
     setError('');
 
     try {
-      const payload = await api('/api/login', { method: 'POST', body: { email, password } });
+      const payload = await api('/api/login', { method: 'POST', body: { account, password } });
       onLogin(payload.user);
     } catch (err) {
       setError(err.message);
@@ -109,8 +109,8 @@ function LoginScreen({ onLogin }) {
         <p>Chỉ tài khoản có role <strong>administrator</strong> mới được vào màn kiểm soát dung lượng và terminal.</p>
         <form onSubmit={submit} className="login-form">
           <label>
-            Email administrator
-            <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="email" required />
+            Tài khoản administrator
+            <input value={account} onChange={(event) => setAccount(event.target.value)} type="text" autoComplete="username" required />
           </label>
           <label>
             Mật khẩu

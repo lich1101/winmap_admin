@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\User;
 use App\Services\DrupalSiteDiscoveryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\File;
@@ -68,5 +69,24 @@ class WebsiteQuotaControlTest extends TestCase
             ->assertJsonPath('data.last_sync_status', 'ok');
 
         Http::assertSentCount(1);
+    }
+
+    public function test_admin_can_login_with_account_name_like_web_login(): void
+    {
+        User::factory()->create([
+            'name' => 'Administrator',
+            'email' => 'admin@example.com',
+            'password' => Hash::make('secret-123'),
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->postJson('/api/login', [
+            'account' => 'administrator',
+            'password' => 'secret-123',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('user.email', 'admin@example.com');
     }
 }

@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Models\User;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -13,18 +15,27 @@ class AuthController extends Controller
     public function login(Request $request): JsonResponse
     {
         $credentials = $request->validate([
-            'email' => ['required', 'email'],
+            'account' => ['required', 'string', 'max:255'],
             'password' => ['required', 'string'],
         ]);
 
-        if (! Auth::attempt($credentials, true)) {
+        $account = trim((string) $credentials['account']);
+        $password = (string) $credentials['password'];
+
+        $user = User::query()
+            ->whereRaw('LOWER(email) = ?', [mb_strtolower($account)])
+            ->orWhereRaw('LOWER(name) = ?', [mb_strtolower($account)])
+            ->first();
+
+        if (! $user || ! Hash::check($password, $user->password)) {
             throw ValidationException::withMessages([
-                'email' => 'Email hoặc mật khẩu không đúng.',
+                'account' => 'Tài khoản hoặc mật khẩu không đúng.',
             ]);
         }
 
+        Auth::login($user, true);
         $request->session()->regenerate();
-        $user = $request->user();
+        $user = $request->user() ?: $user;
 
         if (! $user || ! $user->isAdministrator()) {
             Auth::logout();
