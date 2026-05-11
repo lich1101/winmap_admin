@@ -1,0 +1,47 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\CommandLog;
+use App\Models\MonitoredWebsite;
+use App\Services\ByteFormatter;
+use App\Services\ServerUsageService;
+use Illuminate\Http\JsonResponse;
+
+class DashboardController extends Controller
+{
+    public function __invoke(ServerUsageService $serverUsage): JsonResponse
+    {
+        $websites = MonitoredWebsite::query()
+            ->orderBy('domain')
+            ->get()
+            ->map(fn (MonitoredWebsite $website) => $this->decorateWebsite($website));
+
+        return response()->json([
+            'server' => $serverUsage->summary(),
+            'summary' => [
+                'website_count' => $websites->count(),
+                'enabled_count' => $websites->where('enabled', true)->count(),
+                'over_quota_count' => $websites->where('last_is_blocked', true)->count(),
+                'warning_count' => $websites->where('last_is_warning', true)->where('last_is_blocked', false)->count(),
+                'total_project_bytes' => $websites->sum('last_project_bytes'),
+                'total_project_human' => ByteFormatter::human($websites->sum('last_project_bytes')),
+            ],
+            'websites' => $websites->values(),
+            'recent_commands' => CommandLog::query()->latest()->limit(8)->get(),
+        ]);
+    }
+
+    private function decorateWebsite(MonitoredWebsite $website): array
+    {
+        $data = $website->toArray();
+        $data['quota_human'] = ByteFormatter::human($website->quota_bytes);
+        $data['last_disk_human'] = ByteFormatter::human($website->last_disk_bytes);
+        $data['last_database_human'] = ByteFormatter::human($website->last_database_bytes);
+        $data['last_project_human'] = ByteFormatter::human($website->last_project_bytes);
+        $data['over_quota'] = $website->last_is_blocked || ($website->quota_bytes > 0 && $website->last_project_bytes > $website->quota_bytes);
+
+        return $data;
+    }
+}
