@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     gnupg \
     default-mysql-client \
+    curl \
     libicu-dev \
     libonig-dev \
     libxml2-dev \
