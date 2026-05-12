@@ -13,6 +13,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'usage_endpoint_url',
     'config_endpoint_url',
     'api_key',
+    'website_username',
+    'website_password',
     'quota_bytes',
     'warning_threshold_percent',
     'enabled',
@@ -32,10 +34,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'discovery_root',
     'discovery_conf_path',
 ])]
-#[Hidden(['api_key'])]
+#[Hidden(['api_key', 'website_password'])]
 class MonitoredWebsite extends Model
 {
-    protected $appends = ['has_api_key'];
+    protected $appends = ['has_api_key', 'has_website_password'];
 
     protected function casts(): array
     {
@@ -52,6 +54,7 @@ class MonitoredWebsite extends Model
             'last_checked_at' => 'datetime',
             'last_synced_at' => 'datetime',
             'api_key' => 'encrypted',
+            'website_password' => 'encrypted',
         ];
     }
 
@@ -63,5 +66,10 @@ class MonitoredWebsite extends Model
     public function getHasApiKeyAttribute(): bool
     {
         return ! empty($this->api_key);
+    }
+
+    public function getHasWebsitePasswordAttribute(): bool
+    {
+        return ! empty($this->website_password);
     }
 }

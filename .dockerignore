@@ -1,0 +1,12 @@
+.git
+.idea
+.vscode
+.zed
+node_modules
+vendor
+storage
+bootstrap/cache
+public/build
+npm-debug.log
+yarn-error.log
+composer.phar

@@ -11,11 +11,21 @@ use Throwable;
 
 class TerminalService
 {
+    public function __construct(
+        private readonly SetupConfigurationService $setupConfiguration,
+        private readonly RemoteServerService $remoteServer,
+    ) {
+    }
+
     public function run(string $command, ?string $cwd, User $user, Request $request): CommandLog
     {
         $started = microtime(true);
         $command = trim($command);
-        $cwd = $this->resolveCwd($cwd ?: base_path());
+        $setup = $this->setupConfiguration->current();
+        $remoteMode = $this->setupConfiguration->isRemoteConfigured($setup);
+        $cwd = $remoteMode
+            ? $this->remoteServer->normalizeRemoteCwd($setup, $cwd)
+            : $this->resolveCwd($cwd ?: base_path());
         $output = '';
         $exitCode = null;
         $status = 'ok';
@@ -24,12 +34,25 @@ class TerminalService
             $this->assertEnabled();
             $tokens = $this->tokenizeAllowedCommand($command);
 
-            $process = new Process($tokens, $cwd, null, null, (float) config('winmap_admin.terminal.timeout', 12));
-            $process->run();
+            if ($remoteMode) {
+                $result = $this->remoteServer->runTerminal(
+                    $setup,
+                    $tokens,
+                    $cwd,
+                    (int) config('winmap_admin.terminal.timeout', 12)
+                );
 
-            $exitCode = $process->getExitCode();
-            $output = $process->getOutput().$process->getErrorOutput();
-            $status = $process->isSuccessful() ? 'ok' : 'failed';
+                $exitCode = (int) ($result['exit_code'] ?? 0);
+                $output = ($result['stdout'] ?? '').($result['stderr'] ?? '');
+                $status = $exitCode === 0 ? 'ok' : 'failed';
+            } else {
+                $process = new Process($tokens, $cwd, null, null, (float) config('winmap_admin.terminal.timeout', 12));
+                $process->run();
+
+                $exitCode = $process->getExitCode();
+                $output = $process->getOutput().$process->getErrorOutput();
+                $status = $process->isSuccessful() ? 'ok' : 'failed';
+            }
         } catch (Throwable $e) {
             $status = 'blocked';
             $output = $e->getMessage();

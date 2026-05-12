@@ -3,8 +3,12 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Models\MonitoredWebsite;
+use App\Models\SetupConfiguration;
 use App\Services\DrupalAuthenticationService;
 use App\Services\DrupalSiteDiscoveryService;
+use App\Services\RemoteServerService;
+use App\Models\WebsiteProvisionRun;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Config;
@@ -49,6 +53,17 @@ class WebsiteQuotaControlTest extends TestCase
                     'is_warning' => false,
                 ],
             ], 200),
+        ]);
+
+        SetupConfiguration::query()->create([
+            'is_completed' => true,
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'enter.winmap.vn',
         ]);
 
         $admin = User::factory()->create([
@@ -147,5 +162,209 @@ class WebsiteQuotaControlTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonValidationErrors('account');
+    }
+
+    public function test_setup_status_is_available_before_setup_is_completed(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->getJson('/api/setup/status');
+
+        $response->assertOk()
+            ->assertJsonPath('completed', false)
+            ->assertJsonPath('config.server_port', 22);
+    }
+
+    public function test_dashboard_is_blocked_until_setup_is_completed(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->getJson('/api/dashboard');
+
+        $response->assertStatus(428)
+            ->assertJsonPath('setup_required', true);
+    }
+
+    public function test_admin_can_preview_setup_discovery_with_mocked_remote_service(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $remote = Mockery::mock(RemoteServerService::class);
+        $remote->shouldReceive('discoverSites')->once()->andReturn([
+            [
+                'name' => 'enter.winmap.vn',
+                'domain' => 'enter.winmap.vn',
+                'usage_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/json',
+                'config_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/quota/config',
+                'discovery_root' => '/srv/www/winmap',
+                'discovery_conf_path' => 'sites/enter.winmap.vn',
+            ],
+        ]);
+        $remote->shouldReceive('serverSummary')->once()->andReturn([
+            'remote_host' => '10.10.10.10',
+            'path' => '/srv/www',
+            'used_percent' => 42,
+            'used_human' => '42 GB',
+            'free_human' => '58 GB',
+            'total_human' => '100 GB',
+        ]);
+        $this->app->instance(RemoteServerService::class, $remote);
+
+        $response = $this->actingAs($admin)->postJson('/api/setup/discover', [
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('server.remote_host', '10.10.10.10')
+            ->assertJsonPath('sites.0.domain', 'enter.winmap.vn');
+    }
+
+    public function test_admin_can_complete_setup_and_store_website_credentials(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/setup/complete', [
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'enter.winmap.vn',
+            'websites' => [
+                [
+                    'name' => 'Enter',
+                    'domain' => 'enter.winmap.vn',
+                    'usage_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/json',
+                    'config_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/quota/config',
+                    'website_username' => 'administrator',
+                    'website_password' => 'site-secret',
+                    'enabled' => true,
+                    'warning_threshold_percent' => 85,
+                ],
+            ],
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('completed', true)
+            ->assertJsonPath('config.auth_site_domain', 'enter.winmap.vn');
+
+        $setup = SetupConfiguration::query()->first();
+        $website = MonitoredWebsite::query()->where('domain', 'enter.winmap.vn')->first();
+
+        $this->assertNotNull($setup);
+        $this->assertTrue((bool) $setup->is_completed);
+        $this->assertSame('10.10.10.10', $setup->server_host);
+        $this->assertNotNull($website);
+        $this->assertSame('administrator', $website->website_username);
+        $this->assertTrue($website->has_website_password);
+    }
+
+    public function test_admin_can_create_website_provision_run_step_by_step(): void
+    {
+        SetupConfiguration::query()->create([
+            'is_completed' => true,
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'enter.winmap.vn',
+        ]);
+
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/website-provision/runs', [
+            'subdomain' => 'newcode',
+            'source_database' => 'inventory',
+            'website_username' => 'administrator',
+            'website_password' => 'site-secret',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.full_domain', 'newcode.winmap.vn')
+            ->assertJsonPath('data.steps.0.key', 'create_subdomain')
+            ->assertJsonCount(5, 'data.steps');
+    }
+
+    public function test_admin_can_run_all_provisioning_steps_and_register_website(): void
+    {
+        SetupConfiguration::query()->create([
+            'is_completed' => true,
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'enter.winmap.vn',
+        ]);
+
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $run = WebsiteProvisionRun::query()->create([
+            'user_id' => $admin->id,
+            'subdomain' => 'newcode',
+            'parent_domain' => 'winmap.vn',
+            'full_domain' => 'newcode.winmap.vn',
+            'www_root' => 'httpdocs_inventory',
+            'system_user' => 'ftp_winmap.vn',
+            'source_database' => 'inventory',
+            'mysql_password_file' => '/root/.mysql_pass',
+            'ssl_registration_email' => 'admin@winmap.vn',
+            'website_username' => 'administrator',
+            'website_password' => 'site-secret',
+            'status' => 'pending',
+            'steps' => [
+                ['key' => 'create_subdomain', 'label' => 'Tạo subdomain Plesk', 'status' => 'pending', 'output' => '', 'description' => '', 'command_preview' => 'a'],
+                ['key' => 'install_ssl', 'label' => 'Cấp SSL', 'status' => 'pending', 'output' => '', 'description' => '', 'command_preview' => 'b'],
+                ['key' => 'copy_directories', 'label' => 'Copy sites/init', 'status' => 'pending', 'output' => '', 'description' => '', 'command_preview' => 'c'],
+                ['key' => 'modify_settings', 'label' => 'Sửa settings.php', 'status' => 'pending', 'output' => '', 'description' => '', 'command_preview' => 'd'],
+                ['key' => 'create_and_clone_database', 'label' => 'Tạo DB và clone dữ liệu', 'status' => 'pending', 'output' => '', 'description' => '', 'command_preview' => 'e'],
+            ],
+        ]);
+
+        $remote = Mockery::mock(RemoteServerService::class);
+        $remote->shouldReceive('runManagedShellScript')->times(5)->andReturn([
+            'stdout' => 'ok',
+            'stderr' => '',
+            'exit_code' => 0,
+        ]);
+        $this->app->instance(RemoteServerService::class, $remote);
+
+        $response = $this->actingAs($admin)->postJson("/api/website-provision/runs/{$run->id}/run-all");
+
+        $response->assertOk()
+            ->assertJsonPath('data.status', 'completed');
+
+        $website = MonitoredWebsite::query()->where('domain', 'newcode.winmap.vn')->first();
+
+        $this->assertNotNull($website);
+        $this->assertSame('administrator', $website->website_username);
+        $this->assertTrue($website->has_website_password);
     }
 }

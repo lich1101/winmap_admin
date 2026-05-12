@@ -16,8 +16,18 @@ class DrupalAuthenticationService
 
     private string|array $tablePrefix = '';
 
+    public function __construct(
+        private readonly SetupConfigurationService $setupConfiguration,
+        private readonly RemoteServerService $remoteServer,
+    ) {
+    }
+
     public function isConfigured(): bool
     {
+        if ($this->setupConfiguration->isRemoteConfigured()) {
+            return true;
+        }
+
         $config = $this->config();
 
         return filled($config['settings_path'] ?? null)
@@ -34,6 +44,11 @@ class DrupalAuthenticationService
             return null;
         }
 
+        $setup = $this->setupConfiguration->current();
+        if ($this->setupConfiguration->isRemoteConfigured($setup)) {
+            return $this->remoteServer->authenticateDrupalAdministrator($setup, $account, $password);
+        }
+
         $record = $this->findUserByAccount($account);
         if (! $record || ! $this->passwordMatches($password, $record)) {
             return null;
@@ -48,7 +63,11 @@ class DrupalAuthenticationService
             return $user->isAdministrator();
         }
 
-        $identity = $this->findAdministratorByUid((int) $user->drupal_uid);
+        $setup = $this->setupConfiguration->current();
+        $identity = $this->setupConfiguration->isRemoteConfigured($setup)
+            ? $this->remoteServer->findDrupalAdministratorByUid($setup, (int) $user->drupal_uid)
+            : $this->findAdministratorByUid((int) $user->drupal_uid);
+
         if (! $identity) {
             $user->role = 'viewer';
             $user->is_active = false;
@@ -209,30 +228,30 @@ class DrupalAuthenticationService
     {
         $config = $this->config();
 
+        if (filled($config['database'] ?? null)) {
+            return [[
+                'driver' => 'mysql',
+                'host' => (string) ($config['host'] ?? '127.0.0.1'),
+                'port' => (string) ($config['port'] ?? '3306'),
+                'database' => (string) $config['database'],
+                'username' => (string) ($config['username'] ?? ''),
+                'password' => (string) ($config['password'] ?? ''),
+                'unix_socket' => (string) ($config['socket'] ?? ''),
+                'charset' => (string) ($config['charset'] ?? 'utf8mb4'),
+                'collation' => (string) ($config['collation'] ?? 'utf8mb4_unicode_ci'),
+                'prefix' => '',
+                'prefix_indexes' => true,
+                'strict' => false,
+                'engine' => null,
+            ], (string) ($config['prefix'] ?? '')];
+        }
+
         $settingsPath = $this->resolvedSettingsPath();
         if ($settingsPath !== null) {
             return $this->connectionFromSettings($settingsPath);
         }
 
-        if (blank($config['database'] ?? null)) {
-            throw new RuntimeException('Drupal auth is not configured.');
-        }
-
-        return [[
-            'driver' => 'mysql',
-            'host' => (string) ($config['host'] ?? '127.0.0.1'),
-            'port' => (string) ($config['port'] ?? '3306'),
-            'database' => (string) $config['database'],
-            'username' => (string) ($config['username'] ?? ''),
-            'password' => (string) ($config['password'] ?? ''),
-            'unix_socket' => (string) ($config['socket'] ?? ''),
-            'charset' => (string) ($config['charset'] ?? 'utf8mb4'),
-            'collation' => (string) ($config['collation'] ?? 'utf8mb4_unicode_ci'),
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-        ], (string) ($config['prefix'] ?? '')];
+        throw new RuntimeException('Drupal auth is not configured.');
     }
 
     private function connectionFromSettings(string $settingsPath): array

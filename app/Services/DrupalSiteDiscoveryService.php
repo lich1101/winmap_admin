@@ -8,8 +8,19 @@ use Illuminate\Support\Str;
 
 class DrupalSiteDiscoveryService
 {
+    public function __construct(
+        private readonly SetupConfigurationService $setupConfiguration,
+        private readonly RemoteServerService $remoteServer,
+    ) {
+    }
+
     public function discover(): array
     {
+        $setup = $this->setupConfiguration->current();
+        if ($this->setupConfiguration->isRemoteConfigured($setup)) {
+            return $this->remoteServer->discoverSites($setup);
+        }
+
         $sites = [];
 
         foreach ($this->roots() as $root) {

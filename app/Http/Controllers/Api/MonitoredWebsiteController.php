@@ -108,6 +108,8 @@ class MonitoredWebsiteController extends Controller
             'usage_endpoint_url' => ['required', 'url', 'max:2048'],
             'config_endpoint_url' => ['nullable', 'url', 'max:2048'],
             'api_key' => ['nullable', 'string', 'max:2048'],
+            'website_username' => ['nullable', 'string', 'max:255'],
+            'website_password' => ['nullable', 'string', 'max:2000'],
             'quota_bytes' => ['nullable', 'integer', 'min:0'],
             'quota_gb' => ['nullable', 'numeric', 'min:0'],
             'warning_threshold_percent' => ['nullable', 'integer', 'min:1', 'max:100'],
@@ -128,6 +130,10 @@ class MonitoredWebsiteController extends Controller
             unset($data['api_key']);
         }
 
+        if (($data['website_password'] ?? '') === '') {
+            unset($data['website_password']);
+        }
+
         if (($data['config_endpoint_url'] ?? '') === '' && ! empty($data['usage_endpoint_url'])) {
             $data['config_endpoint_url'] = str_ends_with($data['usage_endpoint_url'], '/json')
                 ? substr($data['usage_endpoint_url'], 0, -5).'/quota/config'
@@ -145,6 +151,7 @@ class MonitoredWebsiteController extends Controller
         $data['last_database_human'] = ByteFormatter::human($website->last_database_bytes);
         $data['last_project_human'] = ByteFormatter::human($website->last_project_bytes);
         $data['over_quota'] = $website->last_is_blocked || ($website->quota_bytes > 0 && $website->last_project_bytes > $website->quota_bytes);
+        $data['has_website_password'] = $website->has_website_password;
 
         return $data;
     }

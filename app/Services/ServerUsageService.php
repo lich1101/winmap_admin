@@ -4,8 +4,19 @@ namespace App\Services;
 
 class ServerUsageService
 {
+    public function __construct(
+        private readonly SetupConfigurationService $setupConfiguration,
+        private readonly RemoteServerService $remoteServer,
+    ) {
+    }
+
     public function summary(?string $path = null): array
     {
+        $setup = $this->setupConfiguration->current();
+        if ($this->setupConfiguration->isRemoteConfigured($setup)) {
+            return $this->remoteServer->serverSummary($setup);
+        }
+
         $path = $path ?: config('winmap_admin.server_usage_path', '/');
         $resolved = realpath($path) ?: $path;
 

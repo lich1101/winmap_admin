@@ -7,18 +7,30 @@ use App\Models\CommandLog;
 use App\Models\MonitoredWebsite;
 use App\Services\ByteFormatter;
 use App\Services\ServerUsageService;
+use App\Services\SetupConfigurationService;
 use Illuminate\Http\JsonResponse;
 
 class DashboardController extends Controller
 {
-    public function __invoke(ServerUsageService $serverUsage): JsonResponse
+    public function __invoke(
+        ServerUsageService $serverUsage,
+        SetupConfigurationService $setupConfiguration,
+    ): JsonResponse
     {
         $websites = MonitoredWebsite::query()
             ->orderBy('domain')
             ->get()
             ->map(fn (MonitoredWebsite $website) => $this->decorateWebsite($website));
 
+        $setup = $setupConfiguration->current();
+
         return response()->json([
+            'setup' => [
+                'server_host' => $setup->server_host,
+                'server_port' => $setup->server_port,
+                'drupal_project_path' => $setup->drupal_project_path,
+                'auth_site_domain' => $setup->auth_site_domain,
+            ],
             'server' => $serverUsage->summary(),
             'summary' => [
                 'website_count' => $websites->count(),

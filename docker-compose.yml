@@ -1,0 +1,59 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: winmap_admin_app
+    working_dir: /var/www/html
+    environment:
+      APP_URL: http://localhost:${APP_PORT:-8088}
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: ${WINMAP_ADMIN_DB_DATABASE:-winmap_admin}
+      DB_USERNAME: ${WINMAP_ADMIN_DB_USERNAME:-winmap}
+      DB_PASSWORD: ${WINMAP_ADMIN_DB_PASSWORD:-winmap}
+      DRUPAL_DISCOVERY_ROOTS: ${WINMAP_ADMIN_DRUPAL_DISCOVERY_ROOTS:-/workspace/winmap_new}
+      DRUPAL_AUTH_PASSWORD_INC_PATH: ${WINMAP_ADMIN_DRUPAL_AUTH_PASSWORD_INC_PATH:-/workspace/winmap_new/includes/password.inc}
+      TERMINAL_ALLOWED_ROOTS: ${WINMAP_ADMIN_TERMINAL_ALLOWED_ROOTS:-/var/www/html|/workspace/winmap_new}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/var/www/html
+      - ../winmap_new:/workspace/winmap_new:ro
+      - composer_cache:/tmp/composer-cache
+      - vendor_data:/var/www/html/vendor
+      - node_modules_data:/var/www/html/node_modules
+    ports:
+      - "${APP_PORT:-8088}:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["/usr/local/bin/winmap-admin-start"]
+
+  mysql:
+    image: mysql:8.4
+    container_name: winmap_admin_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${WINMAP_ADMIN_DB_DATABASE:-winmap_admin}
+      MYSQL_USER: ${WINMAP_ADMIN_DB_USERNAME:-winmap}
+      MYSQL_PASSWORD: ${WINMAP_ADMIN_DB_PASSWORD:-winmap}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "${MYSQL_FORWARD_PORT:-33067}:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  mysql_data:
+  composer_cache:
+  vendor_data:
+  node_modules_data:
