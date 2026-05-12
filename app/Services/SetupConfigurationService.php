@@ -30,6 +30,9 @@ class SetupConfigurationService
         if (($resolved['server_password'] ?? '') === '' && $setup->exists && ! empty($setup->server_password)) {
             $resolved['server_password'] = $setup->server_password;
         }
+        if (($resolved['default_website_password'] ?? '') === '' && $setup->exists && ! empty($setup->default_website_password)) {
+            $resolved['default_website_password'] = $setup->default_website_password;
+        }
 
         $setup->fill($resolved);
 
@@ -45,6 +48,9 @@ class SetupConfigurationService
 
         if (($attributes['server_password'] ?? '') === '' && $setup->exists) {
             unset($attributes['server_password']);
+        }
+        if (($attributes['default_website_password'] ?? '') === '' && $setup->exists) {
+            unset($attributes['default_website_password']);
         }
 
         $setup->fill($attributes);

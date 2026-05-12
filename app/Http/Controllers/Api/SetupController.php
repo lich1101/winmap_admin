@@ -56,6 +56,7 @@ class SetupController extends Controller
                 return array_merge($site, [
                     'website_username' => $existing?->website_username,
                     'has_website_password' => (bool) ($existing?->has_website_password),
+                    'uses_default_credentials' => $existing ? (bool) $existing->uses_default_credentials : true,
                     'enabled' => $existing?->enabled ?? true,
                     'warning_threshold_percent' => $existing?->warning_threshold_percent ?? 85,
                     'quota_bytes' => $existing?->quota_bytes ?? 0,
@@ -69,8 +70,11 @@ class SetupController extends Controller
         SetupConfigurationService $setupService,
     ): JsonResponse {
         $serverData = $this->validatedServerConfig($request, $setupService);
+        $currentSetup = $setupService->current();
         $payload = $request->validate([
             'auth_site_domain' => ['required', 'string', 'max:255'],
+            'default_website_username' => ['nullable', 'string', 'max:255'],
+            'default_website_password' => ['nullable', 'string', 'max:2000'],
             'websites' => ['required', 'array', 'min:1'],
             'websites.*.name' => ['required', 'string', 'max:255'],
             'websites.*.domain' => ['required', 'string', 'max:255'],
@@ -78,7 +82,8 @@ class SetupController extends Controller
             'websites.*.config_endpoint_url' => ['nullable', 'url', 'max:2048'],
             'websites.*.discovery_root' => ['nullable', 'string', 'max:1000'],
             'websites.*.discovery_conf_path' => ['nullable', 'string', 'max:1000'],
-            'websites.*.website_username' => ['required', 'string', 'max:255'],
+            'websites.*.credential_override' => ['nullable', 'boolean'],
+            'websites.*.website_username' => ['nullable', 'string', 'max:255'],
             'websites.*.website_password' => ['nullable', 'string', 'max:2000'],
             'websites.*.enabled' => ['nullable', 'boolean'],
             'websites.*.warning_threshold_percent' => ['nullable', 'integer', 'min:1', 'max:100'],
@@ -91,9 +96,27 @@ class SetupController extends Controller
             abort(422, 'Website xác thực administrator phải nằm trong danh sách multisite vừa quét.');
         }
 
+        $defaultUsername = trim((string) ($payload['default_website_username'] ?? ''));
+        $defaultPassword = trim((string) ($payload['default_website_password'] ?? ''));
+        $anySiteUsesDefault = collect($payload['websites'])->contains(
+            fn (array $website): bool => ! (bool) ($website['credential_override'] ?? false)
+        );
+
+        if ($anySiteUsesDefault) {
+            if ($defaultUsername === '') {
+                abort(422, 'Thiếu tài khoản mặc định cho nhóm website dùng chung credential.');
+            }
+
+            if ($defaultPassword === '' && ! $currentSetup->has_default_website_password) {
+                abort(422, 'Thiếu mật khẩu mặc định cho nhóm website dùng chung credential.');
+            }
+        }
+
         $setup = DB::transaction(function () use ($setupService, $serverData, $payload) {
             $setup = $setupService->persist(array_merge($serverData, [
                 'auth_site_domain' => $payload['auth_site_domain'],
+                'default_website_username' => trim((string) ($payload['default_website_username'] ?? '')) ?: null,
+                'default_website_password' => trim((string) ($payload['default_website_password'] ?? '')),
             ]), true);
 
             foreach ($payload['websites'] as $websiteInput) {
@@ -101,9 +124,17 @@ class SetupController extends Controller
                     'domain' => $websiteInput['domain'],
                 ]);
 
+                $usesOverride = (bool) ($websiteInput['credential_override'] ?? false);
+                $username = trim((string) ($websiteInput['website_username'] ?? ''));
                 $password = trim((string) ($websiteInput['website_password'] ?? ''));
-                if ($password === '' && ! $website->exists) {
-                    abort(422, sprintf('Thiếu mật khẩu truy cập cho website %s.', $websiteInput['domain']));
+                if ($usesOverride) {
+                    if ($username === '') {
+                        abort(422, sprintf('Thiếu tài khoản truy cập riêng cho website %s.', $websiteInput['domain']));
+                    }
+
+                    if ($password === '' && ! ($website->exists && $website->has_website_password)) {
+                        abort(422, sprintf('Thiếu mật khẩu truy cập riêng cho website %s.', $websiteInput['domain']));
+                    }
                 }
 
                 $quotaBytes = array_key_exists('quota_gb', $websiteInput) && $websiteInput['quota_gb'] !== null && $websiteInput['quota_gb'] !== ''
@@ -114,9 +145,14 @@ class SetupController extends Controller
                 $website->usage_endpoint_url = $websiteInput['usage_endpoint_url'];
                 $website->config_endpoint_url = $websiteInput['config_endpoint_url']
                     ?: $this->derivedConfigEndpoint($websiteInput['usage_endpoint_url']);
-                $website->website_username = $websiteInput['website_username'];
-                if ($password !== '') {
-                    $website->website_password = $password;
+                if ($usesOverride) {
+                    $website->website_username = $username;
+                    if ($password !== '') {
+                        $website->website_password = $password;
+                    }
+                } else {
+                    $website->website_username = null;
+                    $website->website_password = null;
                 }
                 $website->quota_bytes = $quotaBytes;
                 $website->enabled = (bool) ($websiteInput['enabled'] ?? ($website->enabled ?? true));
@@ -175,6 +211,8 @@ class SetupController extends Controller
             'drupal_project_path' => $setup->drupal_project_path,
             'drupal_site_scheme' => $setup->drupal_site_scheme ?: 'https',
             'auth_site_domain' => $setup->auth_site_domain,
+            'default_website_username' => $setup->default_website_username,
+            'has_default_website_password' => (bool) $setup->has_default_website_password,
         ];
     }
 
@@ -188,6 +226,7 @@ class SetupController extends Controller
             'config_endpoint_url' => $website->config_endpoint_url,
             'website_username' => $website->website_username,
             'has_website_password' => $website->has_website_password,
+            'uses_default_credentials' => $website->uses_default_credentials,
             'enabled' => $website->enabled,
             'warning_threshold_percent' => $website->warning_threshold_percent,
             'quota_bytes' => $website->quota_bytes,

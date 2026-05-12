@@ -265,7 +265,7 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
     drupal_site_scheme: initialConfig.drupal_site_scheme || 'https',
   });
   const [authSiteDomain, setAuthSiteDomain] = useState(initialConfig.auth_site_domain || initialWebsites[0]?.domain || '');
-  const [defaultAccount, setDefaultAccount] = useState('');
+  const [defaultAccount, setDefaultAccount] = useState(initialConfig.default_website_username || '');
   const [defaultPassword, setDefaultPassword] = useState('');
   const [sites, setSites] = useState(initialWebsites);
   const [serverPreview, setServerPreview] = useState(null);
@@ -287,6 +287,17 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
   function updateSite(index, key, value) {
     setSites((current) => current.map((site, siteIndex) => {
       if (siteIndex !== index) return site;
+
+      if (key === 'use_default_credentials') {
+        return {
+          ...site,
+          use_default_credentials: value,
+          website_username: value ? '' : (site.website_username || defaultAccount),
+          website_password: value ? '' : site.website_password,
+          has_website_password: value ? false : site.has_website_password,
+        };
+      }
+
       return {
         ...site,
         [key]: value,
@@ -298,9 +309,10 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
   function applyDefaultsToSites() {
     setSites((current) => current.map((site) => ({
       ...site,
-      website_username: site.website_username || defaultAccount,
-      website_password: site.website_password || defaultPassword,
-      has_website_password: site.has_website_password || Boolean(defaultPassword || site.website_password),
+      use_default_credentials: true,
+      website_username: '',
+      website_password: '',
+      has_website_password: false,
     })));
   }
 
@@ -345,6 +357,8 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
         body: {
           ...serverForm,
           auth_site_domain: authSiteDomain,
+          default_website_username: defaultAccount,
+          default_website_password: defaultPassword || '',
           websites: sites.map((site) => ({
             name: site.name,
             domain: site.domain,
@@ -352,8 +366,9 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
             config_endpoint_url: site.config_endpoint_url,
             discovery_root: site.discovery_root,
             discovery_conf_path: site.discovery_conf_path,
-            website_username: site.website_username,
-            website_password: site.website_password || '',
+            credential_override: !site.use_default_credentials,
+            website_username: site.use_default_credentials ? '' : site.website_username,
+            website_password: site.use_default_credentials ? '' : (site.website_password || ''),
             enabled: site.enabled,
             warning_threshold_percent: site.warning_threshold_percent || 85,
             quota_bytes: site.quota_bytes || 0,
@@ -461,7 +476,7 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
               <div className="panel-header compact">
                 <div>
                   <h2>Bước 2: Chọn website và điền credential</h2>
-                  <p>Phần này lưu thông tin truy cập từng website, đồng thời chọn website dùng để xác thực administrator cho backend.</p>
+                  <p>Nhập một credential mặc định dùng chung cho toàn bộ website. Chỉ những site nào khác credential chung mới cần bật override và nhập riêng.</p>
                 </div>
                 <button type="button" className="ghost-button" onClick={() => setStep(1)}><ArrowLeft size={16} />Sửa server</button>
               </div>
@@ -478,13 +493,13 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
               <section className="site-defaults">
                 <div>
                   <strong>Credential mặc định</strong>
-                  <p>Nếu nhiều site dùng cùng một tài khoản, điền ở đây rồi áp dụng xuống toàn bộ danh sách.</p>
+                  <p>Đây là tài khoản administrator dùng chung. Website nào cùng credential thì không cần nhập riêng ở từng dòng.</p>
                 </div>
                 <div className="form-grid three-up">
                   <label>Tài khoản mặc định<input value={defaultAccount} onChange={(event) => setDefaultAccount(event.target.value)} placeholder="administrator" /></label>
-                  <label>Mật khẩu mặc định<input value={defaultPassword} onChange={(event) => setDefaultPassword(event.target.value)} type="password" placeholder="Mật khẩu cho nhiều site" /></label>
+                  <label>Mật khẩu mặc định<input value={defaultPassword} onChange={(event) => setDefaultPassword(event.target.value)} type="password" placeholder={initialConfig.has_default_website_password ? 'Để trống để giữ mật khẩu mặc định đã lưu' : 'Mật khẩu cho nhiều site'} /></label>
                   <div className="button-stack">
-                    <button type="button" className="ghost-button" onClick={applyDefaultsToSites}><KeyRound size={16} />Áp dụng xuống danh sách</button>
+                    <button type="button" className="ghost-button" onClick={applyDefaultsToSites}><KeyRound size={16} />Cho toàn bộ dùng mặc định</button>
                   </div>
                 </div>
               </section>
@@ -503,15 +518,51 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
                       </span>
                     </div>
 
-                    <div className="form-grid three-up">
-                      <label>Tài khoản website<input value={site.website_username} onChange={(event) => updateSite(index, 'website_username', event.target.value)} placeholder="administrator" required /></label>
-                      <label>Mật khẩu website<input value={site.website_password} onChange={(event) => updateSite(index, 'website_password', event.target.value)} type="password" placeholder={site.has_website_password ? 'Để trống để giữ mật khẩu đã lưu' : 'Mật khẩu của site'} /></label>
-                      <label>Ngưỡng cảnh báo %<input value={site.warning_threshold_percent} onChange={(event) => updateSite(index, 'warning_threshold_percent', event.target.value)} type="number" min="1" max="100" /></label>
+                    <div className="site-credential-mode">
+                      <label className="check-line">
+                        <input
+                          type="checkbox"
+                          checked={site.use_default_credentials}
+                          onChange={(event) => updateSite(index, 'use_default_credentials', event.target.checked)}
+                        />
+                        Dùng credential mặc định
+                      </label>
+                      <small>
+                        {site.use_default_credentials
+                          ? `Site này đang kế thừa credential chung${defaultAccount ? ` (${defaultAccount})` : ''}.`
+                          : 'Site này đang dùng credential riêng do bạn nhập tay.'}
+                      </small>
                     </div>
+
+                    {site.use_default_credentials ? (
+                      <div className="site-credential-inherit">
+                        <small>
+                          {initialConfig.has_default_website_password || defaultPassword
+                            ? 'Mật khẩu sẽ dùng từ credential mặc định đã lưu ở trên.'
+                            : 'Chưa có mật khẩu mặc định được lưu. Cần nhập ở khối credential mặc định trước khi hoàn tất setup.'}
+                        </small>
+                      </div>
+                    ) : (
+                      <div className="form-grid three-up">
+                        <label>Tài khoản website<input value={site.website_username} onChange={(event) => updateSite(index, 'website_username', event.target.value)} placeholder={defaultAccount || 'administrator'} required={!site.use_default_credentials} /></label>
+                        <label>Mật khẩu website<input value={site.website_password} onChange={(event) => updateSite(index, 'website_password', event.target.value)} type="password" placeholder={site.has_website_password ? 'Để trống để giữ mật khẩu override đã lưu' : 'Mật khẩu riêng của site'} /></label>
+                        <label>Ngưỡng cảnh báo %<input value={site.warning_threshold_percent} onChange={(event) => updateSite(index, 'warning_threshold_percent', event.target.value)} type="number" min="1" max="100" /></label>
+                      </div>
+                    )}
+
+                    {site.use_default_credentials ? (
+                      <div className="form-grid one-up">
+                        <label>Ngưỡng cảnh báo %<input value={site.warning_threshold_percent} onChange={(event) => updateSite(index, 'warning_threshold_percent', event.target.value)} type="number" min="1" max="100" /></label>
+                      </div>
+                    ) : null}
 
                     <div className="site-card-foot">
                       <label className="check-line"><input type="checkbox" checked={site.enabled} onChange={(event) => updateSite(index, 'enabled', event.target.checked)} />Theo dõi website này</label>
-                      <small>{site.has_website_password ? 'Đã có mật khẩu lưu trong hệ thống.' : 'Chưa có mật khẩu lưu cho website này.'}</small>
+                      <small>
+                        {site.use_default_credentials
+                          ? ((initialConfig.has_default_website_password || defaultPassword) ? 'Đang dùng mật khẩu mặc định của hệ thống.' : 'Chưa có mật khẩu mặc định lưu trong hệ thống.')
+                          : (site.has_website_password ? 'Đã có mật khẩu override lưu trong hệ thống.' : 'Chưa có mật khẩu override lưu cho website này.')}
+                      </small>
                     </div>
                   </article>
                 ))}
@@ -546,6 +597,7 @@ function normalizeSite(site) {
     website_username: site.website_username || '',
     website_password: '',
     has_website_password: Boolean(site.has_website_password),
+    use_default_credentials: site.uses_default_credentials ?? !(site.website_username || site.has_website_password),
     enabled: site.enabled ?? true,
     warning_threshold_percent: site.warning_threshold_percent || 85,
     quota_bytes: site.quota_bytes || 0,
@@ -649,6 +701,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
 
           <section className="content-grid">
             <WebsitePanel
+              setup={setup}
               websites={websites}
               refreshingId={refreshingId}
               discovering={discovering}
@@ -702,7 +755,7 @@ function MetricCard({ icon, label, value, sub, tone, percent }) {
   );
 }
 
-function WebsitePanel({ websites, refreshingId, discovering, onRefresh, onEdit, onDelete, onCreate, onProvision, onDiscoverySync }) {
+function WebsitePanel({ setup, websites, refreshingId, discovering, onRefresh, onEdit, onDelete, onCreate, onProvision, onDiscoverySync }) {
   return (
     <section className="panel website-panel">
       <div className="panel-header">
@@ -740,7 +793,11 @@ function WebsitePanel({ websites, refreshingId, discovering, onRefresh, onEdit, 
                 <td>
                   <strong>{site.name}</strong>
                   <small>{site.domain}</small>
-                  <small>Credential: {site.website_username || 'chưa điền'} · {site.has_website_password ? 'đã lưu mật khẩu' : 'chưa có mật khẩu'}</small>
+                  <small>
+                    {site.uses_default_credentials
+                      ? `Credential: mặc định${setup.default_website_username ? ` (${setup.default_website_username})` : ''} · ${setup.has_default_website_password ? 'đã lưu mật khẩu mặc định' : 'chưa có mật khẩu mặc định'}`
+                      : `Credential riêng: ${site.website_username || 'chưa điền'} · ${site.has_website_password ? 'đã lưu mật khẩu riêng' : 'chưa có mật khẩu riêng'}`}
+                  </small>
                   {site.has_api_key ? null : <small className="muted-alert">Chưa có API key, quota chưa đẩy tự động xuống site.</small>}
                 </td>
                 <td>

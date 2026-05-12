@@ -261,7 +261,7 @@ class WebsiteQuotaControlTest extends TestCase
             ->assertJsonPath('message', 'SSH command failed. Permission denied.');
     }
 
-    public function test_admin_can_complete_setup_and_store_website_credentials(): void
+    public function test_admin_can_complete_setup_with_shared_default_credential(): void
     {
         $admin = User::factory()->create([
             'role' => 'administrator',
@@ -276,14 +276,15 @@ class WebsiteQuotaControlTest extends TestCase
             'drupal_project_path' => '/srv/www/winmap',
             'drupal_site_scheme' => 'https',
             'auth_site_domain' => 'enter.winmap.vn',
+            'default_website_username' => 'administrator',
+            'default_website_password' => 'shared-secret',
             'websites' => [
                 [
                     'name' => 'Enter',
                     'domain' => 'enter.winmap.vn',
                     'usage_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/json',
                     'config_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/quota/config',
-                    'website_username' => 'administrator',
-                    'website_password' => 'site-secret',
+                    'credential_override' => false,
                     'enabled' => true,
                     'warning_threshold_percent' => 85,
                 ],
@@ -300,9 +301,68 @@ class WebsiteQuotaControlTest extends TestCase
         $this->assertNotNull($setup);
         $this->assertTrue((bool) $setup->is_completed);
         $this->assertSame('10.10.10.10', $setup->server_host);
+        $this->assertSame('administrator', $setup->default_website_username);
+        $this->assertTrue($setup->has_default_website_password);
         $this->assertNotNull($website);
-        $this->assertSame('administrator', $website->website_username);
-        $this->assertTrue($website->has_website_password);
+        $this->assertNull($website->website_username);
+        $this->assertFalse($website->has_website_password);
+        $this->assertTrue($website->uses_default_credentials);
+    }
+
+    public function test_setup_can_mix_shared_default_credential_with_site_override(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/setup/complete', [
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'aec.winmap.vn',
+            'default_website_username' => 'administrator',
+            'default_website_password' => 'shared-secret',
+            'websites' => [
+                [
+                    'name' => 'AEC',
+                    'domain' => 'aec.winmap.vn',
+                    'usage_endpoint_url' => 'https://aec.winmap.vn/application/site-usage/json',
+                    'config_endpoint_url' => 'https://aec.winmap.vn/application/site-usage/quota/config',
+                    'credential_override' => false,
+                    'enabled' => true,
+                    'warning_threshold_percent' => 85,
+                ],
+                [
+                    'name' => 'Autopex',
+                    'domain' => 'autopex.winmap.vn',
+                    'usage_endpoint_url' => 'https://autopex.winmap.vn/application/site-usage/json',
+                    'config_endpoint_url' => 'https://autopex.winmap.vn/application/site-usage/quota/config',
+                    'credential_override' => true,
+                    'website_username' => 'administrator',
+                    'website_password' => 'override-secret',
+                    'enabled' => true,
+                    'warning_threshold_percent' => 90,
+                ],
+            ],
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('completed', true);
+
+        $shared = MonitoredWebsite::query()->where('domain', 'aec.winmap.vn')->first();
+        $override = MonitoredWebsite::query()->where('domain', 'autopex.winmap.vn')->first();
+
+        $this->assertNotNull($shared);
+        $this->assertNotNull($override);
+        $this->assertTrue($shared->uses_default_credentials);
+        $this->assertNull($shared->website_username);
+        $this->assertSame('administrator', $override->website_username);
+        $this->assertTrue($override->has_website_password);
+        $this->assertFalse($override->uses_default_credentials);
     }
 
     public function test_admin_can_create_website_provision_run_step_by_step(): void

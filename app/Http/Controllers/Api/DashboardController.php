@@ -30,6 +30,8 @@ class DashboardController extends Controller
                 'server_port' => $setup->server_port,
                 'drupal_project_path' => $setup->drupal_project_path,
                 'auth_site_domain' => $setup->auth_site_domain,
+                'default_website_username' => $setup->default_website_username,
+                'has_default_website_password' => (bool) $setup->has_default_website_password,
             ],
             'server' => $serverUsage->summary(),
             'summary' => [
@@ -53,6 +55,7 @@ class DashboardController extends Controller
         $data['last_database_human'] = ByteFormatter::human($website->last_database_bytes);
         $data['last_project_human'] = ByteFormatter::human($website->last_project_bytes);
         $data['over_quota'] = $website->last_is_blocked || ($website->quota_bytes > 0 && $website->last_project_bytes > $website->quota_bytes);
+        $data['uses_default_credentials'] = $website->uses_default_credentials;
 
         return $data;
     }

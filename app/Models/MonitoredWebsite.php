@@ -37,7 +37,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Hidden(['api_key', 'website_password'])]
 class MonitoredWebsite extends Model
 {
-    protected $appends = ['has_api_key', 'has_website_password'];
+    protected $appends = ['has_api_key', 'has_website_password', 'uses_default_credentials'];
 
     protected function casts(): array
     {
@@ -71,5 +71,10 @@ class MonitoredWebsite extends Model
     public function getHasWebsitePasswordAttribute(): bool
     {
         return ! empty($this->website_password);
+    }
+
+    public function getUsesDefaultCredentialsAttribute(): bool
+    {
+        return empty($this->website_username) && empty($this->website_password);
     }
 }
