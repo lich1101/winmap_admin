@@ -9,6 +9,7 @@ use App\Services\SetupConfigurationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Database\QueryException;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
 use Throwable;
@@ -112,64 +113,70 @@ class SetupController extends Controller
             }
         }
 
-        $setup = DB::transaction(function () use ($setupService, $serverData, $payload) {
-            $setup = $setupService->persist(array_merge($serverData, [
-                'auth_site_domain' => $payload['auth_site_domain'],
-                'default_website_username' => trim((string) ($payload['default_website_username'] ?? '')) ?: null,
-                'default_website_password' => trim((string) ($payload['default_website_password'] ?? '')),
-            ]), true);
+        try {
+            $setup = DB::transaction(function () use ($setupService, $serverData, $payload) {
+                $setup = $setupService->persist(array_merge($serverData, [
+                    'auth_site_domain' => $payload['auth_site_domain'],
+                    'default_website_username' => trim((string) ($payload['default_website_username'] ?? '')) ?: null,
+                    'default_website_password' => trim((string) ($payload['default_website_password'] ?? '')),
+                ]), true);
 
-            foreach ($payload['websites'] as $websiteInput) {
-                $website = MonitoredWebsite::query()->firstOrNew([
-                    'domain' => $websiteInput['domain'],
-                ]);
+                foreach ($payload['websites'] as $websiteInput) {
+                    $website = MonitoredWebsite::query()->firstOrNew([
+                        'domain' => $websiteInput['domain'],
+                    ]);
 
-                $usesOverride = (bool) ($websiteInput['credential_override'] ?? false);
-                $username = trim((string) ($websiteInput['website_username'] ?? ''));
-                $password = trim((string) ($websiteInput['website_password'] ?? ''));
-                if ($usesOverride) {
-                    if ($username === '') {
-                        abort(422, sprintf('Thiếu tài khoản truy cập riêng cho website %s.', $websiteInput['domain']));
+                    $usesOverride = (bool) ($websiteInput['credential_override'] ?? false);
+                    $username = trim((string) ($websiteInput['website_username'] ?? ''));
+                    $password = trim((string) ($websiteInput['website_password'] ?? ''));
+                    if ($usesOverride) {
+                        if ($username === '') {
+                            abort(422, sprintf('Thiếu tài khoản truy cập riêng cho website %s.', $websiteInput['domain']));
+                        }
+
+                        if ($password === '' && ! ($website->exists && $website->has_website_password)) {
+                            abort(422, sprintf('Thiếu mật khẩu truy cập riêng cho website %s.', $websiteInput['domain']));
+                        }
                     }
 
-                    if ($password === '' && ! ($website->exists && $website->has_website_password)) {
-                        abort(422, sprintf('Thiếu mật khẩu truy cập riêng cho website %s.', $websiteInput['domain']));
+                    $quotaBytes = array_key_exists('quota_gb', $websiteInput) && $websiteInput['quota_gb'] !== null && $websiteInput['quota_gb'] !== ''
+                        ? (int) round(((float) $websiteInput['quota_gb']) * 1024 * 1024 * 1024)
+                        : (int) ($websiteInput['quota_bytes'] ?? ($website->quota_bytes ?? 0));
+
+                    $website->name = $websiteInput['name'];
+                    $website->usage_endpoint_url = $websiteInput['usage_endpoint_url'];
+                    $website->config_endpoint_url = $websiteInput['config_endpoint_url']
+                        ?: $this->derivedConfigEndpoint($websiteInput['usage_endpoint_url']);
+                    if ($usesOverride) {
+                        $website->website_username = $username;
+                        if ($password !== '') {
+                            $website->website_password = $password;
+                        }
+                    } else {
+                        $website->website_username = null;
+                        $website->website_password = null;
                     }
-                }
-
-                $quotaBytes = array_key_exists('quota_gb', $websiteInput) && $websiteInput['quota_gb'] !== null && $websiteInput['quota_gb'] !== ''
-                    ? (int) round(((float) $websiteInput['quota_gb']) * 1024 * 1024 * 1024)
-                    : (int) ($websiteInput['quota_bytes'] ?? ($website->quota_bytes ?? 0));
-
-                $website->name = $websiteInput['name'];
-                $website->usage_endpoint_url = $websiteInput['usage_endpoint_url'];
-                $website->config_endpoint_url = $websiteInput['config_endpoint_url']
-                    ?: $this->derivedConfigEndpoint($websiteInput['usage_endpoint_url']);
-                if ($usesOverride) {
-                    $website->website_username = $username;
-                    if ($password !== '') {
-                        $website->website_password = $password;
+                    $website->quota_bytes = $quotaBytes;
+                    $website->enabled = (bool) ($websiteInput['enabled'] ?? ($website->enabled ?? true));
+                    $website->warning_threshold_percent = (int) ($websiteInput['warning_threshold_percent'] ?? ($website->warning_threshold_percent ?? 85));
+                    $website->discovery_root = $websiteInput['discovery_root'] ?? $setup->drupal_project_path;
+                    $website->discovery_conf_path = $websiteInput['discovery_conf_path'] ?? null;
+                    if (! $website->exists && blank($website->notes)) {
+                        $website->notes = sprintf(
+                            'Khởi tạo từ setup wizard (%s).',
+                            $setup->drupal_project_path
+                        );
                     }
-                } else {
-                    $website->website_username = null;
-                    $website->website_password = null;
+                    $website->save();
                 }
-                $website->quota_bytes = $quotaBytes;
-                $website->enabled = (bool) ($websiteInput['enabled'] ?? ($website->enabled ?? true));
-                $website->warning_threshold_percent = (int) ($websiteInput['warning_threshold_percent'] ?? ($website->warning_threshold_percent ?? 85));
-                $website->discovery_root = $websiteInput['discovery_root'] ?? $setup->drupal_project_path;
-                $website->discovery_conf_path = $websiteInput['discovery_conf_path'] ?? null;
-                if (! $website->exists && blank($website->notes)) {
-                    $website->notes = sprintf(
-                        'Khởi tạo từ setup wizard (%s).',
-                        $setup->drupal_project_path
-                    );
-                }
-                $website->save();
-            }
 
-            return $setup;
-        });
+                return $setup;
+            });
+        } catch (Throwable $exception) {
+            throw ValidationException::withMessages([
+                'auth_site_domain' => [$this->resolveCompleteSetupError($exception)],
+            ]);
+        }
 
         return response()->json([
             'message' => 'Đã lưu cấu hình server, multisite và credential website.',
@@ -240,5 +247,18 @@ class SetupController extends Controller
         return str_ends_with($usageEndpoint, '/json')
             ? substr($usageEndpoint, 0, -5).'/quota/config'
             : rtrim($usageEndpoint, '/').'/quota/config';
+    }
+
+    private function resolveCompleteSetupError(Throwable $exception): string
+    {
+        if ($exception instanceof QueryException) {
+            $message = $exception->getMessage();
+
+            if (str_contains($message, 'default_website_username') || str_contains($message, 'default_website_password')) {
+                return 'Database của winmap_admin chưa chạy migration mới cho credential mặc định. Cần chạy php artisan migrate --force rồi thử lại.';
+            }
+        }
+
+        return $exception->getMessage() ?: 'Lưu setup thất bại.';
     }
 }
