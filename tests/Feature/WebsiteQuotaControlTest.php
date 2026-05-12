@@ -89,6 +89,80 @@ class WebsiteQuotaControlTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_admin_can_refresh_all_websites_usage(): void
+    {
+        SetupConfiguration::query()->create([
+            'is_completed' => true,
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'enter.winmap.vn',
+        ]);
+
+        MonitoredWebsite::query()->create([
+            'name' => 'Enter',
+            'domain' => 'enter.winmap.vn',
+            'usage_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/json',
+            'config_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/quota/config',
+            'enabled' => true,
+            'quota_bytes' => 1024 * 1024 * 1024,
+            'warning_threshold_percent' => 85,
+        ]);
+
+        MonitoredWebsite::query()->create([
+            'name' => 'Demo',
+            'domain' => 'demo.winmap.vn',
+            'usage_endpoint_url' => 'https://demo.winmap.vn/application/site-usage/json',
+            'config_endpoint_url' => 'https://demo.winmap.vn/application/site-usage/quota/config',
+            'enabled' => true,
+            'quota_bytes' => 1024 * 1024 * 1024,
+            'warning_threshold_percent' => 85,
+        ]);
+
+        Http::fake([
+            'https://enter.winmap.vn/application/site-usage/json' => Http::response([
+                'totals' => [
+                    'disk_bytes' => 100,
+                    'database_bytes' => 50,
+                    'project_bytes' => 150,
+                ],
+                'quota' => [
+                    'is_blocked' => false,
+                    'is_warning' => false,
+                ],
+            ], 200),
+            'https://demo.winmap.vn/application/site-usage/json' => Http::response([
+                'totals' => [
+                    'disk_bytes' => 200,
+                    'database_bytes' => 75,
+                    'project_bytes' => 275,
+                ],
+                'quota' => [
+                    'is_blocked' => false,
+                    'is_warning' => false,
+                ],
+            ], 200),
+        ]);
+
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/websites/refresh-all');
+
+        $response->assertOk()
+            ->assertJsonPath('summary.count', 2)
+            ->assertJsonPath('summary.success', 2)
+            ->assertJsonPath('summary.errors', 0);
+
+        $this->assertSame(150, MonitoredWebsite::query()->where('domain', 'enter.winmap.vn')->value('last_project_bytes'));
+        $this->assertSame(275, MonitoredWebsite::query()->where('domain', 'demo.winmap.vn')->value('last_project_bytes'));
+    }
+
     public function test_admin_can_login_with_account_name_like_web_login(): void
     {
         User::factory()->create([

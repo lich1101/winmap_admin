@@ -71,6 +71,45 @@ class MonitoredWebsiteController extends Controller
         ]);
     }
 
+    public function refreshAll(DrupalUsageClient $client): JsonResponse
+    {
+        $websites = MonitoredWebsite::query()->orderBy('domain')->get();
+        $results = [];
+        $success = 0;
+        $errors = 0;
+
+        foreach ($websites as $website) {
+            $snapshot = $client->refresh($website);
+            $fresh = $website->fresh();
+            $results[] = [
+                'website' => $this->decorate($fresh),
+                'snapshot_status' => $snapshot->status,
+                'snapshot_error' => $snapshot->error,
+            ];
+
+            if ($snapshot->status === 'ok') {
+                $success++;
+            } else {
+                $errors++;
+            }
+        }
+
+        return response()->json([
+            'message' => sprintf(
+                'Đã lấy số liệu %d website: %d thành công, %d lỗi.',
+                $websites->count(),
+                $success,
+                $errors
+            ),
+            'summary' => [
+                'count' => $websites->count(),
+                'success' => $success,
+                'errors' => $errors,
+            ],
+            'data' => $results,
+        ]);
+    }
+
     public function discovery(DrupalSiteDiscoveryService $discovery): JsonResponse
     {
         return response()->json([

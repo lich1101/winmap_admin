@@ -23,6 +23,7 @@ Route::middleware('web')->group(function (): void {
 
             Route::get('websites/discovery', [MonitoredWebsiteController::class, 'discovery']);
             Route::post('websites/discovery/sync', [MonitoredWebsiteController::class, 'syncDiscovery']);
+            Route::post('websites/refresh-all', [MonitoredWebsiteController::class, 'refreshAll']);
             Route::apiResource('websites', MonitoredWebsiteController::class);
             Route::post('websites/{website}/refresh', [MonitoredWebsiteController::class, 'refresh']);
 

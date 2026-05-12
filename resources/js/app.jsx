@@ -613,6 +613,8 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
   const [provisioningOpen, setProvisioningOpen] = useState(false);
   const [refreshingId, setRefreshingId] = useState(null);
   const [discovering, setDiscovering] = useState(false);
+  const [bulkRefreshing, setBulkRefreshing] = useState(false);
+  const [autoRefreshDone, setAutoRefreshDone] = useState(false);
 
   const websites = dashboard?.websites || [];
   const server = dashboard?.server;
@@ -638,8 +640,24 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
     loadDashboard();
   }, []);
 
+  useEffect(() => {
+    if (
+      autoRefreshDone
+      || loading
+      || bulkRefreshing
+      || websites.length === 0
+      || websites.some((site) => Boolean(site.last_checked_at))
+    ) {
+      return;
+    }
+
+    setAutoRefreshDone(true);
+    refreshAllWebsites(true);
+  }, [autoRefreshDone, bulkRefreshing, loading, websites]);
+
   async function refreshWebsite(id) {
     setRefreshingId(id);
+    setError('');
     setNotice('');
     try {
       await api(`/api/websites/${id}/refresh`, { method: 'POST' });
@@ -648,6 +666,26 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
       setError(err.message);
     } finally {
       setRefreshingId(null);
+    }
+  }
+
+  async function refreshAllWebsites(silent = false) {
+    setBulkRefreshing(true);
+    setError('');
+    if (!silent) {
+      setNotice('');
+    }
+
+    try {
+      const payload = await api('/api/websites/refresh-all', { method: 'POST' });
+      if (!silent) {
+        setNotice(payload.message || 'Đã lấy số liệu toàn bộ website.');
+      }
+      await loadDashboard();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBulkRefreshing(false);
     }
   }
 
@@ -705,7 +743,9 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
               websites={websites}
               refreshingId={refreshingId}
               discovering={discovering}
+              bulkRefreshing={bulkRefreshing}
               onRefresh={refreshWebsite}
+              onRefreshAll={refreshAllWebsites}
               onEdit={setEditing}
               onDelete={deleteWebsite}
               onCreate={() => setEditing({})}
@@ -755,15 +795,19 @@ function MetricCard({ icon, label, value, sub, tone, percent }) {
   );
 }
 
-function WebsitePanel({ setup, websites, refreshingId, discovering, onRefresh, onEdit, onDelete, onCreate, onProvision, onDiscoverySync }) {
+function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshing, onRefresh, onRefreshAll, onEdit, onDelete, onCreate, onProvision, onDiscoverySync }) {
   return (
     <section className="panel website-panel">
       <div className="panel-header">
         <div>
           <h2>Website đang giám sát</h2>
-          <p>Quota, cảnh báo gần đầy và trạng thái khóa được đồng bộ trực tiếp xuống từng Drupal site.</p>
+          <p>Danh sách này lấy site từ multisite Drupal, sau đó gọi usage endpoint của từng site để đọc disk, database và tổng dung lượng thực tế.</p>
         </div>
         <div className="panel-actions">
+          <button className="ghost-button" onClick={() => onRefreshAll(false)} disabled={bulkRefreshing}>
+            {bulkRefreshing ? <Loader2 className="spin" size={16} /> : <Database size={16} />}
+            Lấy số liệu tất cả
+          </button>
           <button className="ghost-button" onClick={onDiscoverySync} disabled={discovering}>
             {discovering ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
             Quét multisite
@@ -798,7 +842,7 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, onRefresh, o
                       ? `Credential: mặc định${setup.default_website_username ? ` (${setup.default_website_username})` : ''} · ${setup.has_default_website_password ? 'đã lưu mật khẩu mặc định' : 'chưa có mật khẩu mặc định'}`
                       : `Credential riêng: ${site.website_username || 'chưa điền'} · ${site.has_website_password ? 'đã lưu mật khẩu riêng' : 'chưa có mật khẩu riêng'}`}
                   </small>
-                  {site.has_api_key ? null : <small className="muted-alert">Chưa có API key, quota chưa đẩy tự động xuống site.</small>}
+                  {site.has_api_key ? null : <small className="muted-alert">Chưa có API key nên chưa đẩy quota tự động xuống site. Việc đọc usage vẫn chạy được nếu usage endpoint của site không khóa key.</small>}
                 </td>
                 <td>
                   <strong>{site.last_project_human}</strong>
@@ -811,7 +855,8 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, onRefresh, o
                 </td>
                 <td>
                   <StatusPill site={site} />
-                  <small>{site.last_checked_at ? new Date(site.last_checked_at).toLocaleString('vi-VN') : 'Chưa check'}</small>
+                  <small>{site.last_checked_at ? new Date(site.last_checked_at).toLocaleString('vi-VN') : 'Chưa lấy số liệu'}</small>
+                  {site.last_error ? <small className="muted-alert">Usage lỗi: {site.last_error}</small> : null}
                   {site.last_sync_status === 'error' && <small className="muted-alert">Sync quota lỗi: {site.last_sync_error}</small>}
                 </td>
                 <td className="row-actions">
@@ -1258,7 +1303,7 @@ function ProvisionStatus({ status }) {
   if (status === 'completed') return <span className="pill ok"><CheckCircle2 size={13} />Hoàn tất</span>;
   if (status === 'failed') return <span className="pill danger"><ShieldAlert size={13} />Lỗi</span>;
   if (status === 'running') return <span className="pill warn"><Loader2 className="spin" size={13} />Đang chạy</span>;
-  return <span className="pill idle">Pending</span>;
+  return <span className="pill idle">Chờ chạy</span>;
 }
 
 function UsageBar({ percent }) {
@@ -1273,7 +1318,7 @@ function StatusPill({ site }) {
   if (site.last_is_warning) return <span className="pill warn"><AlertTriangle size={13} />Sắp đầy</span>;
   if (site.last_status === 'ok') return <span className="pill ok"><Activity size={13} />OK</span>;
   if (site.last_status === 'error') return <span className="pill danger">Lỗi</span>;
-  return <span className="pill idle">Pending</span>;
+  return <span className="pill idle">Chưa lấy</span>;
 }
 
 createRoot(document.getElementById('root')).render(<App />);
