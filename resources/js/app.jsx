@@ -42,7 +42,22 @@ async function api(path, options = {}) {
   });
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  let payload = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = {
+        message: text
+          .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+          .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 500) || 'Server Error',
+      };
+    }
+  }
 
   if (!response.ok) {
     const message = payload.message || Object.values(payload.errors || {}).flat().join(' ') || `HTTP ${response.status}`;

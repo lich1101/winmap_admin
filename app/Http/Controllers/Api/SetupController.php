@@ -9,7 +9,9 @@ use App\Services\SetupConfigurationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
+use Throwable;
 
 class SetupController extends Controller
 {
@@ -36,8 +38,14 @@ class SetupController extends Controller
         $data = $this->validatedServerConfig($request, $setupService);
         $setup = $setupService->preview($data);
 
-        $sites = $remoteServer->discoverSites($setup);
-        $server = $remoteServer->serverSummary($setup);
+        try {
+            $sites = $remoteServer->discoverSites($setup);
+            $server = $remoteServer->serverSummary($setup);
+        } catch (Throwable $exception) {
+            throw ValidationException::withMessages([
+                'server_host' => [$exception->getMessage()],
+            ]);
+        }
 
         return response()->json([
             'config' => $this->serializeConfig($setup),

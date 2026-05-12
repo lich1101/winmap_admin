@@ -405,15 +405,23 @@ trap cleanup EXIT
 cat > "$TMP_FILE" <<'__WINMAP_PHP__'
 __PHP_SCRIPT__
 __WINMAP_PHP__
-php "$TMP_FILE" "$@"
+PHP_OUTPUT="$(php "$TMP_FILE" "$@")"
+printf '__WINMAP_JSON_BEGIN__\n%s\n__WINMAP_JSON_END__\n' "$PHP_OUTPUT"
 SH;
 
         $shellScript = str_replace('__PHP_SCRIPT__', $phpScript, $shellScript);
         $result = $this->runShellScript($setup, $shellScript, $args, $timeout);
-        $payload = json_decode(trim($result['stdout']), true);
+        $stdout = trim((string) ($result['stdout'] ?? ''));
+        if (! preg_match('/__WINMAP_JSON_BEGIN__\R(.*)\R__WINMAP_JSON_END__/s', $stdout, $matches)) {
+            $snippet = trim($stdout."\n".($result['stderr'] ?? ''));
+            throw new RuntimeException('Remote PHP script did not return valid JSON. '.$this->shortenDiagnostic($snippet));
+        }
+
+        $payload = json_decode(trim((string) $matches[1]), true);
 
         if (! is_array($payload)) {
-            throw new RuntimeException('Remote PHP script did not return valid JSON.');
+            $snippet = trim($stdout."\n".($result['stderr'] ?? ''));
+            throw new RuntimeException('Remote PHP script returned malformed JSON. '.$this->shortenDiagnostic($snippet));
         }
 
         return $payload;
@@ -432,6 +440,8 @@ SH;
             'UserKnownHostsFile=/dev/null',
             '-o',
             'ConnectTimeout=8',
+            '-o',
+            'LogLevel=ERROR',
             '-p',
             (string) ($setup->server_port ?: 22),
         ];
@@ -477,7 +487,8 @@ SH;
             $process->run();
 
             if (! $process->isSuccessful()) {
-                throw new RuntimeException(trim($process->getErrorOutput()."\n".$process->getOutput()) ?: 'SSH command failed.');
+                $details = trim($process->getErrorOutput()."\n".$process->getOutput());
+                throw new RuntimeException('SSH command failed. '.($this->shortenDiagnostic($details) ?: 'No diagnostic output.'));
             }
 
             return [
@@ -497,5 +508,16 @@ SH;
         if (! filled($setup->server_host) || ! filled($setup->server_username) || ! filled($setup->drupal_project_path)) {
             throw new RuntimeException('Thiếu cấu hình server hoặc path Drupal để chạy lệnh từ xa.');
         }
+    }
+
+    private function shortenDiagnostic(string $message): string
+    {
+        $clean = trim(preg_replace('/\s+/', ' ', strip_tags($message)) ?? '');
+
+        if ($clean === '') {
+            return '';
+        }
+
+        return Str::limit($clean, 500);
     }
 }

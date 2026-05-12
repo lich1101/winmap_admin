@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\File;
 use Mockery;
+use RuntimeException;
 use Tests\TestCase;
 
 class WebsiteQuotaControlTest extends TestCase
@@ -231,6 +232,33 @@ class WebsiteQuotaControlTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('server.remote_host', '10.10.10.10')
             ->assertJsonPath('sites.0.domain', 'enter.winmap.vn');
+    }
+
+    public function test_setup_discovery_returns_validation_error_when_remote_execution_fails(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $remote = Mockery::mock(RemoteServerService::class);
+        $remote->shouldReceive('discoverSites')
+            ->once()
+            ->andThrow(new RuntimeException('SSH command failed. Permission denied.'));
+        $remote->shouldNotReceive('serverSummary');
+        $this->app->instance(RemoteServerService::class, $remote);
+
+        $response = $this->actingAs($admin)->postJson('/api/setup/discover', [
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('message', 'SSH command failed. Permission denied.');
     }
 
     public function test_admin_can_complete_setup_and_store_website_credentials(): void
