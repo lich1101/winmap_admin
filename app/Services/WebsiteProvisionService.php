@@ -370,6 +370,7 @@ SH, [$run->subdomain, $run->parent_domain, $run->source_database, $run->mysql_pa
         }
         $website->enabled = $website->exists ? $website->enabled : true;
         $website->quota_bytes = $website->exists ? $website->quota_bytes : 0;
+        $website->user_limit = $website->exists ? $website->user_limit : 0;
         $website->warning_threshold_percent = $website->exists ? $website->warning_threshold_percent : 85;
         $website->discovery_root = $setup->drupal_project_path;
         $website->discovery_conf_path = 'sites/'.$run->full_domain;

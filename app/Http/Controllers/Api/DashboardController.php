@@ -55,6 +55,10 @@ class DashboardController extends Controller
         $data['last_database_human'] = ByteFormatter::human($website->last_database_bytes);
         $data['last_project_human'] = ByteFormatter::human($website->last_project_bytes);
         $data['over_quota'] = $website->last_is_blocked || ($website->quota_bytes > 0 && $website->last_project_bytes > $website->quota_bytes);
+        $data['user_usage_percent'] = $website->user_limit > 0
+            ? round(($website->last_user_count / $website->user_limit) * 100, 2)
+            : 0;
+        $data['over_user_limit'] = $website->user_limit > 0 && $website->last_user_count > $website->user_limit;
         $data['uses_default_credentials'] = $website->uses_default_credentials;
 
         return $data;

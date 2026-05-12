@@ -11,6 +11,11 @@ use Throwable;
 
 class DrupalUsageClient
 {
+    public function __construct(
+        private readonly SetupConfigurationService $setupConfiguration,
+    ) {
+    }
+
     public function refresh(MonitoredWebsite $website): UsageSnapshot
     {
         $checkedAt = now();
@@ -40,6 +45,7 @@ class DrupalUsageClient
             $usagePercent = $website->quota_bytes > 0 ? round(($projectBytes / $website->quota_bytes) * 100, 2) : 0;
             $isBlocked = (bool) Arr::get($quota, 'is_blocked', false);
             $isWarning = (bool) Arr::get($quota, 'is_warning', false);
+            $userCount = (int) Arr::get($quota, 'user_count', Arr::get($sitePayload, 'package.user_count', 0));
             $status = $isBlocked ? 'blocked' : ($isWarning ? 'warning' : 'ok');
 
             $website->forceFill([
@@ -48,6 +54,7 @@ class DrupalUsageClient
                 'last_disk_bytes' => $diskBytes,
                 'last_database_bytes' => $databaseBytes,
                 'last_project_bytes' => $projectBytes,
+                'last_user_count' => $userCount,
                 'last_usage_percent' => $usagePercent,
                 'last_is_blocked' => $isBlocked,
                 'last_is_warning' => $isWarning,
@@ -101,6 +108,9 @@ class DrupalUsageClient
                 ->withHeaders($this->headers($website))
                 ->post($endpoint, [
                     'quota_bytes' => (int) $website->quota_bytes,
+                    'storage_quota_gb' => $website->quota_bytes > 0 ? round($website->quota_bytes / 1024 / 1024 / 1024, 4) : 0,
+                    'user_limit' => (int) $website->user_limit,
+                    'max_accounts' => (int) $website->user_limit,
                     'warning_threshold_percent' => (int) $website->warning_threshold_percent,
                     'enforcement_enabled' => (bool) $website->enabled,
                 ]);
@@ -114,6 +124,7 @@ class DrupalUsageClient
                 throw new RuntimeException('Quota config endpoint did not return valid JSON.');
             }
 
+            $packageSync = $this->syncPackageConfig($website);
             $quota = Arr::get($payload, 'quota', []);
             $website->forceFill([
                 'last_sync_status' => 'ok',
@@ -121,9 +132,12 @@ class DrupalUsageClient
                 'last_synced_at' => $syncedAt,
                 'last_is_blocked' => (bool) Arr::get($quota, 'is_blocked', $website->last_is_blocked),
                 'last_is_warning' => (bool) Arr::get($quota, 'is_warning', $website->last_is_warning),
+                'last_user_count' => (int) Arr::get($quota, 'user_count', $website->last_user_count),
             ])->save();
 
-            return $payload;
+            return $payload + [
+                'package_config' => $packageSync,
+            ];
         } catch (Throwable $e) {
             $website->forceFill([
                 'last_sync_status' => 'error',
@@ -133,6 +147,16 @@ class DrupalUsageClient
 
             throw $e;
         }
+    }
+
+    public function clearCache(MonitoredWebsite $website): array
+    {
+        return $this->postOperation($website, 'clear_cache', 'cache/clear', 60);
+    }
+
+    public function runUpdate(MonitoredWebsite $website): array
+    {
+        return $this->postOperation($website, 'run_update', 'update/run', 300);
     }
 
     private function pickSitePayload(array $payload, MonitoredWebsite $website): array
@@ -161,6 +185,150 @@ class DrupalUsageClient
             : [];
     }
 
+    private function syncPackageConfig(MonitoredWebsite $website): array
+    {
+        $credentials = $this->websiteCredentials($website);
+        if ($credentials['username'] === '' || $credentials['password'] === '') {
+            return [
+                'status' => 'skipped',
+                'message' => 'Thiếu credential administrator nên chưa gọi /api/admin/package-config.',
+            ];
+        }
+
+        $baseUrl = $this->websiteBaseUrl($website);
+        if ($baseUrl === '') {
+            return [
+                'status' => 'skipped',
+                'message' => 'Không suy ra được base URL website để gọi package-config.',
+            ];
+        }
+
+        $token = $this->requestDrupalAccessToken($baseUrl, $credentials['username'], $credentials['password']);
+        $storageGb = $website->quota_bytes > 0 ? round($website->quota_bytes / 1024 / 1024 / 1024, 4) : 0;
+
+        $response = Http::acceptJson()
+            ->timeout(20)
+            ->withToken($token)
+            ->post($baseUrl.'/api/admin/package-config', [
+                'max_accounts' => (int) $website->user_limit,
+                'storage_quota_gb' => $storageGb,
+            ]);
+
+        $payload = $response->json();
+        if (! is_array($payload)) {
+            $payload = ['message' => trim(strip_tags($response->body())) ?: 'Package config endpoint did not return JSON.'];
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException('Package config endpoint returned HTTP '.$response->status().': '.Arr::get($payload, 'message', 'Unknown error'));
+        }
+
+        return [
+            'status' => 'success',
+            'endpoint' => $baseUrl.'/api/admin/package-config',
+            'payload' => $payload,
+        ];
+    }
+
+    private function requestDrupalAccessToken(string $baseUrl, string $username, string $password): string
+    {
+        $response = Http::acceptJson()
+            ->asForm()
+            ->timeout(20)
+            ->post($baseUrl.'/api/password/token', [
+                'grant_type' => 'password',
+                'client_id' => (string) config('winmap_admin.drupal_oauth.client_id', 'primary_client'),
+                'client_secret' => (string) config('winmap_admin.drupal_oauth.client_secret', ''),
+                'username' => $username,
+                'password' => $password,
+            ]);
+
+        $payload = $response->json();
+        if (! is_array($payload)) {
+            $payload = ['message' => trim(strip_tags($response->body())) ?: 'Token endpoint did not return JSON.'];
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException('Token endpoint returned HTTP '.$response->status().': '.Arr::get($payload, 'message', 'Unknown error'));
+        }
+
+        $token = (string) Arr::get($payload, 'data.access_token', Arr::get($payload, 'access_token', ''));
+        if ($token === '') {
+            throw new RuntimeException('Token endpoint không trả access_token.');
+        }
+
+        return $token;
+    }
+
+    private function websiteCredentials(MonitoredWebsite $website): array
+    {
+        if (! empty($website->website_username) || ! empty($website->website_password)) {
+            return [
+                'username' => trim((string) $website->website_username),
+                'password' => (string) $website->website_password,
+            ];
+        }
+
+        $setup = $this->setupConfiguration->current();
+
+        return [
+            'username' => trim((string) $setup->default_website_username),
+            'password' => (string) $setup->default_website_password,
+        ];
+    }
+
+    private function websiteBaseUrl(MonitoredWebsite $website): string
+    {
+        foreach ([$website->usage_endpoint_url, $website->config_endpoint_url] as $endpoint) {
+            $endpoint = trim((string) $endpoint);
+            if ($endpoint === '') {
+                continue;
+            }
+
+            $parts = parse_url($endpoint);
+            if (! empty($parts['scheme']) && ! empty($parts['host'])) {
+                return $parts['scheme'].'://'.$parts['host'];
+            }
+        }
+
+        return $website->domain ? 'https://'.trim((string) $website->domain, '/') : '';
+    }
+
+    private function postOperation(MonitoredWebsite $website, string $operation, string $suffix, int $timeout): array
+    {
+        $endpoint = $this->operationEndpointUrl($website, $suffix);
+        if ($endpoint === '') {
+            throw new RuntimeException('Thiếu usage endpoint để chạy thao tác '.$operation.'.');
+        }
+        if (! $website->api_key) {
+            throw new RuntimeException('Website chưa có API key nên không thể chạy thao tác quản trị từ xa.');
+        }
+
+        $response = Http::acceptJson()
+            ->timeout($timeout)
+            ->withHeaders($this->headers($website))
+            ->post($endpoint);
+
+        $payload = $response->json();
+        if (! is_array($payload)) {
+            $body = trim(strip_tags($response->body()));
+            $payload = [
+                'status' => 'error',
+                'message' => $body !== '' ? mb_substr($body, 0, 500) : 'Endpoint did not return valid JSON.',
+            ];
+        }
+
+        if (! $response->successful()) {
+            $message = (string) Arr::get($payload, 'message', 'Remote operation returned HTTP '.$response->status());
+            throw new RuntimeException($message);
+        }
+
+        return $payload + [
+            'operation' => $operation,
+            'endpoint' => $endpoint,
+        ];
+    }
+
     private function configEndpointUrl(MonitoredWebsite $website): string
     {
         $configured = trim((string) $website->config_endpoint_url);
@@ -176,5 +344,19 @@ class DrupalUsageClient
         return str_ends_with($usageEndpoint, '/json')
             ? substr($usageEndpoint, 0, -5).'/quota/config'
             : rtrim($usageEndpoint, '/').'/quota/config';
+    }
+
+    private function operationEndpointUrl(MonitoredWebsite $website, string $suffix): string
+    {
+        $usageEndpoint = trim((string) $website->usage_endpoint_url);
+        if ($usageEndpoint === '') {
+            return '';
+        }
+
+        $base = str_ends_with($usageEndpoint, '/json')
+            ? substr($usageEndpoint, 0, -5)
+            : rtrim($usageEndpoint, '/');
+
+        return rtrim($base, '/').'/'.ltrim($suffix, '/');
     }
 }

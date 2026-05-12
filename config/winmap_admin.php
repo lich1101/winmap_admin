@@ -34,4 +34,9 @@ return [
         'collation' => env('DRUPAL_AUTH_DB_COLLATION', 'utf8mb4_unicode_ci'),
         'password_inc_path' => env('DRUPAL_AUTH_PASSWORD_INC_PATH', dirname(base_path()).'/winmap_new/includes/password.inc'),
     ],
+
+    'drupal_oauth' => [
+        'client_id' => env('DRUPAL_OAUTH_CLIENT_ID', 'primary_client'),
+        'client_secret' => env('DRUPAL_OAUTH_CLIENT_SECRET', 'RKGidZCB7Lit9FAGmaHl4Nt1tJKjS3upNR6aQ6'),
+    ],
 ];

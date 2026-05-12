@@ -61,6 +61,7 @@ class SetupController extends Controller
                     'enabled' => $existing?->enabled ?? true,
                     'warning_threshold_percent' => $existing?->warning_threshold_percent ?? 85,
                     'quota_bytes' => $existing?->quota_bytes ?? 0,
+                    'user_limit' => $existing?->user_limit ?? 0,
                 ]);
             })->values(),
         ]);
@@ -90,6 +91,7 @@ class SetupController extends Controller
             'websites.*.warning_threshold_percent' => ['nullable', 'integer', 'min:1', 'max:100'],
             'websites.*.quota_bytes' => ['nullable', 'integer', 'min:0'],
             'websites.*.quota_gb' => ['nullable', 'numeric', 'min:0'],
+            'websites.*.user_limit' => ['nullable', 'integer', 'min:0'],
         ]);
 
         $domains = collect($payload['websites'])->pluck('domain')->all();
@@ -157,6 +159,7 @@ class SetupController extends Controller
                         $website->website_password = null;
                     }
                     $website->quota_bytes = $quotaBytes;
+                    $website->user_limit = (int) ($websiteInput['user_limit'] ?? ($website->user_limit ?? 0));
                     $website->enabled = (bool) ($websiteInput['enabled'] ?? ($website->enabled ?? true));
                     $website->warning_threshold_percent = (int) ($websiteInput['warning_threshold_percent'] ?? ($website->warning_threshold_percent ?? 85));
                     $website->discovery_root = $websiteInput['discovery_root'] ?? $setup->drupal_project_path;
@@ -237,6 +240,7 @@ class SetupController extends Controller
             'enabled' => $website->enabled,
             'warning_threshold_percent' => $website->warning_threshold_percent,
             'quota_bytes' => $website->quota_bytes,
+            'user_limit' => $website->user_limit,
             'discovery_root' => $website->discovery_root,
             'discovery_conf_path' => $website->discovery_conf_path,
         ];

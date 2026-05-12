@@ -70,6 +70,36 @@ async function api(path, options = {}) {
   return payload;
 }
 
+function websiteHomeUrl(site) {
+  const usageEndpoint = (site?.usage_endpoint_url || '').trim();
+  if (usageEndpoint) {
+    try {
+      const parsed = new URL(usageEndpoint);
+      return `${parsed.protocol}//${parsed.host}`;
+    } catch {
+      // Fall back to the domain-based URL below.
+    }
+  }
+
+  const domain = (site?.domain || '').trim();
+  return domain ? `https://${domain}` : '#';
+}
+
+const maintenanceOperations = {
+  'clear-cache': {
+    route: 'clear-cache',
+    label: 'Clear cache',
+    runningLabel: 'Đang clear cache',
+    doneLabel: 'Đã clear cache',
+  },
+  'run-update': {
+    route: 'run-update',
+    label: 'Chạy update.php',
+    runningLabel: 'Đang chạy update.php',
+    doneLabel: 'Đã chạy update.php',
+  },
+};
+
 function App() {
   const [user, setUser] = useState(null);
   const [setupStatus, setSetupStatus] = useState(null);
@@ -372,6 +402,7 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
             enabled: site.enabled,
             warning_threshold_percent: site.warning_threshold_percent || 85,
             quota_bytes: site.quota_bytes || 0,
+            user_limit: Number(site.user_limit || 0),
           })),
         },
       });
@@ -550,9 +581,21 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
                       </div>
                     )}
 
-                    {site.use_default_credentials ? (
-                      <div className="form-grid one-up">
+                    <div className="form-grid two-up">
+                      {site.use_default_credentials ? (
                         <label>Ngưỡng cảnh báo %<input value={site.warning_threshold_percent} onChange={(event) => updateSite(index, 'warning_threshold_percent', event.target.value)} type="number" min="1" max="100" /></label>
+                      ) : null}
+                      <label>Số user được phép<input value={site.user_limit} onChange={(event) => updateSite(index, 'user_limit', event.target.value)} type="number" min="0" step="1" placeholder="0 = không giới hạn" /></label>
+                      <label>Dung lượng được phép (GB)<input value={site.quota_gb ?? (site.quota_bytes ? Math.round((site.quota_bytes / 1024 / 1024 / 1024) * 100) / 100 : '')} onChange={(event) => {
+                        const value = event.target.value;
+                        updateSite(index, 'quota_gb', value);
+                        updateSite(index, 'quota_bytes', value === '' ? 0 : Math.round(Number(value) * 1024 * 1024 * 1024));
+                      }} type="number" min="0" step="0.01" placeholder="0 = không giới hạn" /></label>
+                    </div>
+
+                    {site.use_default_credentials ? (
+                      <div className="site-credential-inherit">
+                        <small>Hai thông số gói ở trên sẽ đồng bộ xuống `/api/admin/package-config` và quota endpoint của từng website.</small>
                       </div>
                     ) : null}
 
@@ -601,6 +644,8 @@ function normalizeSite(site) {
     enabled: site.enabled ?? true,
     warning_threshold_percent: site.warning_threshold_percent || 85,
     quota_bytes: site.quota_bytes || 0,
+    quota_gb: site.quota_bytes ? Math.round((site.quota_bytes / 1024 / 1024 / 1024) * 100) / 100 : '',
+    user_limit: site.user_limit || 0,
   };
 }
 
@@ -614,7 +659,16 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
   const [refreshingId, setRefreshingId] = useState(null);
   const [discovering, setDiscovering] = useState(false);
   const [bulkRefreshing, setBulkRefreshing] = useState(false);
-  const [autoRefreshDone, setAutoRefreshDone] = useState(false);
+  const [maintenanceBatch, setMaintenanceBatch] = useState({
+    running: false,
+    operation: '',
+    currentIndex: 0,
+    total: 0,
+    success: 0,
+    errors: 0,
+    currentSite: '',
+    results: [],
+  });
 
   const websites = dashboard?.websites || [];
   const server = dashboard?.server;
@@ -639,21 +693,6 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
   useEffect(() => {
     loadDashboard();
   }, []);
-
-  useEffect(() => {
-    if (
-      autoRefreshDone
-      || loading
-      || bulkRefreshing
-      || websites.length === 0
-      || websites.some((site) => Boolean(site.last_checked_at))
-    ) {
-      return;
-    }
-
-    setAutoRefreshDone(true);
-    refreshAllWebsites(true);
-  }, [autoRefreshDone, bulkRefreshing, loading, websites]);
 
   async function refreshWebsite(id) {
     setRefreshingId(id);
@@ -687,6 +726,91 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
     } finally {
       setBulkRefreshing(false);
     }
+  }
+
+  async function runMaintenanceBatch(operation) {
+    const config = maintenanceOperations[operation];
+    const targets = websites.filter((site) => site.enabled && site.has_api_key);
+    const skipped = websites.filter((site) => site.enabled && !site.has_api_key).length;
+
+    if (!config || maintenanceBatch.running) {
+      return;
+    }
+    if (targets.length === 0) {
+      setError('Không có website nào đủ điều kiện chạy bảo trì. Cần bật website và có API key.');
+      return;
+    }
+
+    let success = 0;
+    let errors = 0;
+    setError('');
+    setNotice('');
+    setMaintenanceBatch({
+      running: true,
+      operation,
+      currentIndex: 0,
+      total: targets.length,
+      success: 0,
+      errors: 0,
+      currentSite: '',
+      results: [],
+    });
+
+    for (let index = 0; index < targets.length; index += 1) {
+      const site = targets[index];
+      setMaintenanceBatch((current) => ({
+        ...current,
+        currentIndex: index,
+        currentSite: site.domain,
+        results: [
+          { id: site.id, domain: site.domain, status: 'running', message: config.runningLabel },
+          ...current.results.filter((item) => item.id !== site.id),
+        ].slice(0, 12),
+      }));
+
+      let result;
+      try {
+        const payload = await api(`/api/websites/${site.id}/${config.route}`, { method: 'POST' });
+        success += 1;
+        result = {
+          id: site.id,
+          domain: site.domain,
+          status: 'success',
+          message: payload.remote?.message || config.doneLabel,
+        };
+      } catch (err) {
+        errors += 1;
+        result = {
+          id: site.id,
+          domain: site.domain,
+          status: 'error',
+          message: err.message,
+        };
+      }
+
+      setMaintenanceBatch((current) => ({
+        ...current,
+        currentIndex: index + 1,
+        currentSite: '',
+        success,
+        errors,
+        results: [
+          result,
+          ...current.results.filter((item) => item.id !== site.id),
+        ].slice(0, 12),
+      }));
+    }
+
+    setMaintenanceBatch((current) => ({
+      ...current,
+      running: false,
+      currentSite: '',
+      currentIndex: targets.length,
+      success,
+      errors,
+    }));
+    setNotice(`${config.doneLabel} ${targets.length} website: ${success} thành công, ${errors} lỗi${skipped ? `, bỏ qua ${skipped} site thiếu API key` : ''}.`);
+    await loadDashboard();
   }
 
   async function deleteWebsite(id) {
@@ -752,7 +876,14 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
               onProvision={() => setProvisioningOpen(true)}
               onDiscoverySync={syncDiscoveredWebsites}
             />
-            <TerminalPanel onError={setError} projectPath={setup.drupal_project_path} />
+            <div className="side-stack">
+              <MaintenanceBatchPanel
+                websites={websites}
+                batch={maintenanceBatch}
+                onRun={runMaintenanceBatch}
+              />
+              <TerminalPanel onError={setError} projectPath={setup.drupal_project_path} />
+            </div>
           </section>
         </>
       )}
@@ -778,6 +909,72 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
         />
       )}
     </main>
+  );
+}
+
+function MaintenanceBatchPanel({ websites, batch, onRun }) {
+  const readyCount = websites.filter((site) => site.enabled && site.has_api_key).length;
+  const missingKeyCount = websites.filter((site) => site.enabled && !site.has_api_key).length;
+  const percent = batch.total > 0 ? Math.round((batch.currentIndex / batch.total) * 100) : 0;
+  const activeConfig = maintenanceOperations[batch.operation];
+
+  return (
+    <section className="panel maintenance-panel">
+      <div className="panel-header compact">
+        <div>
+          <h2>Bảo trì hàng loạt</h2>
+          <p>Chạy tuần tự qua API từng website để tránh dồn tải server.</p>
+        </div>
+        <Activity size={20} />
+      </div>
+
+      <div className="maintenance-actions">
+        <button className="ghost-button" onClick={() => onRun('clear-cache')} disabled={batch.running || readyCount === 0}>
+          {batch.running && batch.operation === 'clear-cache' ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+          Clear cache tất cả
+        </button>
+        <button className="primary-button" onClick={() => onRun('run-update')} disabled={batch.running || readyCount === 0}>
+          {batch.running && batch.operation === 'run-update' ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+          Chạy update.php
+        </button>
+      </div>
+
+      <div className="batch-summary">
+        <span>{readyCount} site sẵn sàng</span>
+        <span>{missingKeyCount} thiếu API key</span>
+      </div>
+
+      <div className="batch-progress">
+        <div className="batch-progress-head">
+          <strong>{batch.running ? activeConfig?.runningLabel : 'Sẵn sàng chạy'}</strong>
+          <span>{percent}%</span>
+        </div>
+        <div className="batch-progress-track">
+          <span style={{ width: `${percent}%` }} />
+        </div>
+        <small>
+          {batch.running
+            ? `${batch.currentIndex}/${batch.total} hoàn tất${batch.currentSite ? ` · đang xử lý ${batch.currentSite}` : ''}`
+            : batch.total > 0
+              ? `${batch.success} thành công · ${batch.errors} lỗi`
+              : 'Chưa có batch nào chạy trong phiên này'}
+        </small>
+      </div>
+
+      {batch.results.length > 0 && (
+        <div className="batch-results">
+          {batch.results.map((item) => (
+            <div key={`${item.id}-${item.status}`} className={`batch-result ${item.status}`}>
+              {item.status === 'running' && <Loader2 className="spin" size={15} />}
+              {item.status === 'success' && <CheckCircle2 size={15} />}
+              {item.status === 'error' && <CircleAlert size={15} />}
+              <span>{item.domain}</span>
+              <small>{item.message}</small>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -835,7 +1032,11 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
             {websites.map((site) => (
               <tr key={site.id} className={site.last_is_blocked ? 'danger-row' : (site.last_is_warning ? 'warn-row' : '')}>
                 <td>
-                  <strong>{site.name}</strong>
+                  <strong>
+                    <a className="website-link" href={websiteHomeUrl(site)} target="_blank" rel="noreferrer noopener">
+                      {site.name}
+                    </a>
+                  </strong>
                   <small>{site.domain}</small>
                   <small>
                     {site.uses_default_credentials
@@ -848,9 +1049,11 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
                   <strong>{site.last_project_human}</strong>
                   <small>Disk {site.last_disk_human} · DB {site.last_database_human}</small>
                   <UsageBar percent={site.last_usage_percent || 0} />
+                  <small>User {site.last_user_count || 0}{site.user_limit > 0 ? ` / ${site.user_limit}` : ' / không giới hạn'}</small>
                 </td>
                 <td>
                   <strong>{site.quota_human}</strong>
+                  <small>{site.user_limit > 0 ? `${site.user_limit} user` : 'Không giới hạn user'}</small>
                   <small>Cảnh báo từ {site.warning_threshold_percent}%</small>
                 </td>
                 <td>
@@ -949,6 +1152,7 @@ function WebsiteDrawer({ website, onClose, onSaved }) {
     website_username: website.website_username || '',
     website_password: '',
     quota_gb: website.quota_bytes ? Math.round((website.quota_bytes / 1024 / 1024 / 1024) * 100) / 100 : '',
+    user_limit: website.user_limit || 0,
     warning_threshold_percent: website.warning_threshold_percent || 85,
     enabled: website.enabled ?? true,
     notes: website.notes || '',
@@ -1006,8 +1210,12 @@ function WebsiteDrawer({ website, onClose, onSaved }) {
             <label>Tài khoản website<input value={form.website_username} onChange={(event) => update('website_username', event.target.value)} placeholder="administrator" /></label>
             <label>Mật khẩu website<input value={form.website_password} onChange={(event) => update('website_password', event.target.value)} type="password" placeholder={website.has_website_password ? 'Bỏ trống để giữ mật khẩu cũ' : 'Mật khẩu website'} /></label>
           </div>
-          <label>Quota GB<input value={form.quota_gb} onChange={(event) => update('quota_gb', event.target.value)} type="number" min="0" step="0.01" /></label>
-          <label>Ngưỡng cảnh báo %<input value={form.warning_threshold_percent} onChange={(event) => update('warning_threshold_percent', event.target.value)} type="number" min="1" max="100" step="1" required /></label>
+          <div className="form-grid three-up">
+            <label>Dung lượng được phép (GB)<input value={form.quota_gb} onChange={(event) => update('quota_gb', event.target.value)} type="number" min="0" step="0.01" placeholder="0 = không giới hạn" /></label>
+            <label>Số user được phép<input value={form.user_limit} onChange={(event) => update('user_limit', event.target.value)} type="number" min="0" step="1" placeholder="0 = không giới hạn" /></label>
+            <label>Ngưỡng cảnh báo %<input value={form.warning_threshold_percent} onChange={(event) => update('warning_threshold_percent', event.target.value)} type="number" min="1" max="100" step="1" required /></label>
+          </div>
+          <div className="info-strip">Khi lưu, admin sẽ đồng bộ dung lượng/user limit xuống `/application/site-usage/quota/config` và `/api/admin/package-config` của website.</div>
           <label>Ghi chú<textarea value={form.notes} onChange={(event) => update('notes', event.target.value)} rows="4" /></label>
           <label className="check-line"><input type="checkbox" checked={form.enabled} onChange={(event) => update('enabled', event.target.checked)} />Đang theo dõi</label>
           {error && <div className="error-box">{error}</div>}
@@ -1157,6 +1365,11 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
     setError('');
   }
 
+  const currentRunSteps = currentRun?.steps || [];
+  const currentRunProgress = currentRunSteps.length > 0
+    ? Math.round((currentRunSteps.filter((step) => step.status === 'success').length / currentRunSteps.length) * 100)
+    : 0;
+
   return (
     <div className="drawer-backdrop">
       <aside className="drawer drawer-wide">
@@ -1226,22 +1439,37 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
                   </div>
                 </div>
 
+                <div className="provision-progress">
+                  <div className="batch-progress-head">
+                    <strong>{currentRunProgress}% hoàn tất</strong>
+                    <span>{currentRunSteps.filter((step) => step.status === 'success').length}/{currentRunSteps.length} bước</span>
+                  </div>
+                  <div className="batch-progress-track">
+                    <span style={{ width: `${currentRunProgress}%` }} />
+                  </div>
+                </div>
+
                 <div className="provision-step-list">
                   {currentRun.steps.map((step, index) => (
-                    <article className={`provision-step-card status-${step.status || 'pending'}`} key={step.key}>
+                    <article
+                      className={`provision-step-card status-${step.status || 'pending'}`}
+                      key={step.key}
+                      title={step.status === 'failed' && step.output ? step.output : ''}
+                    >
                       <div className="provision-step-head">
                         <div>
                           <strong>Bước {index + 1}: {step.label}</strong>
                           <small>{step.description}</small>
+                          {step.status === 'failed' && step.output ? <small className="step-error" title={step.output}><CircleAlert size={14} />Di chuột để xem lỗi đầy đủ</small> : null}
                         </div>
                         <button
                           type="button"
                           className={step.status === 'success' ? 'ghost-button' : 'primary-button'}
                           onClick={() => executeStep(step.key)}
-                          disabled={busy || step.status === 'running' || currentRun.status === 'completed'}
+                          disabled={busy || step.status === 'running' || step.status === 'success' || currentRun.status === 'completed'}
                         >
                           {busy && currentRun.current_step === step.key ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-                          {step.status === 'success' ? 'Chạy lại' : 'Chạy bước này'}
+                          {step.status === 'failed' ? 'Chạy lại bước lỗi' : (step.status === 'success' ? 'Đã xong' : 'Chạy bước này')}
                         </button>
                       </div>
                       <small className="command-preview">{step.command_preview}</small>

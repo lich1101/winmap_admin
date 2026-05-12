@@ -26,6 +26,8 @@ Route::middleware('web')->group(function (): void {
             Route::post('websites/refresh-all', [MonitoredWebsiteController::class, 'refreshAll']);
             Route::apiResource('websites', MonitoredWebsiteController::class);
             Route::post('websites/{website}/refresh', [MonitoredWebsiteController::class, 'refresh']);
+            Route::post('websites/{website}/clear-cache', [MonitoredWebsiteController::class, 'clearCache']);
+            Route::post('websites/{website}/run-update', [MonitoredWebsiteController::class, 'runUpdate']);
 
             Route::post('terminal/run', [TerminalController::class, 'run']);
             Route::get('terminal/history', [TerminalController::class, 'history']);

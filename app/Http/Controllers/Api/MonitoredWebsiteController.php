@@ -71,6 +71,24 @@ class MonitoredWebsiteController extends Controller
         ]);
     }
 
+    public function clearCache(MonitoredWebsite $website, DrupalUsageClient $client): JsonResponse
+    {
+        try {
+            return $this->operationResponse($website, $client->clearCache($website));
+        } catch (\Throwable $e) {
+            return $this->operationErrorResponse($website, $e);
+        }
+    }
+
+    public function runUpdate(MonitoredWebsite $website, DrupalUsageClient $client): JsonResponse
+    {
+        try {
+            return $this->operationResponse($website, $client->runUpdate($website));
+        } catch (\Throwable $e) {
+            return $this->operationErrorResponse($website, $e);
+        }
+    }
+
     public function refreshAll(DrupalUsageClient $client): JsonResponse
     {
         $websites = MonitoredWebsite::query()->orderBy('domain')->get();
@@ -151,6 +169,7 @@ class MonitoredWebsiteController extends Controller
             'website_password' => ['nullable', 'string', 'max:2000'],
             'quota_bytes' => ['nullable', 'integer', 'min:0'],
             'quota_gb' => ['nullable', 'numeric', 'min:0'],
+            'user_limit' => ['nullable', 'integer', 'min:0'],
             'warning_threshold_percent' => ['nullable', 'integer', 'min:1', 'max:100'],
             'enabled' => ['boolean'],
             'notes' => ['nullable', 'string', 'max:5000'],
@@ -162,6 +181,7 @@ class MonitoredWebsiteController extends Controller
         }
 
         $data['quota_bytes'] = $data['quota_bytes'] ?? 0;
+        $data['user_limit'] = (int) ($data['user_limit'] ?? ($website?->user_limit ?? 0));
         $data['enabled'] = $data['enabled'] ?? true;
         $data['warning_threshold_percent'] = (int) ($data['warning_threshold_percent'] ?? ($website?->warning_threshold_percent ?? 85));
 
@@ -190,6 +210,10 @@ class MonitoredWebsiteController extends Controller
         $data['last_database_human'] = ByteFormatter::human($website->last_database_bytes);
         $data['last_project_human'] = ByteFormatter::human($website->last_project_bytes);
         $data['over_quota'] = $website->last_is_blocked || ($website->quota_bytes > 0 && $website->last_project_bytes > $website->quota_bytes);
+        $data['user_usage_percent'] = $website->user_limit > 0
+            ? round(($website->last_user_count / $website->user_limit) * 100, 2)
+            : 0;
+        $data['over_user_limit'] = $website->user_limit > 0 && $website->last_user_count > $website->user_limit;
         $data['has_website_password'] = $website->has_website_password;
 
         return $data;
@@ -210,5 +234,23 @@ class MonitoredWebsiteController extends Controller
                 'data' => $this->decorate($website->refresh()),
             ], 422);
         }
+    }
+
+    private function operationResponse(MonitoredWebsite $website, array $payload): JsonResponse
+    {
+        return response()->json([
+            'status' => 'success',
+            'website' => $this->decorate($website->refresh()),
+            'remote' => $payload,
+        ]);
+    }
+
+    private function operationErrorResponse(MonitoredWebsite $website, \Throwable $e): JsonResponse
+    {
+        return response()->json([
+            'status' => 'error',
+            'message' => $e->getMessage(),
+            'website' => $this->decorate($website->refresh()),
+        ], 502);
     }
 }
