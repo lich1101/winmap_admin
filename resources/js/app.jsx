@@ -167,8 +167,16 @@ function LoginScreen({ onLogin }) {
     setBusy(true);
     setError('');
 
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const accountValue = String(formData.get('account') ?? account).trim();
+    const passwordValue = String(formData.get('password') ?? password);
+
     try {
-      const payload = await api('/api/login', { method: 'POST', body: { account, password } });
+      const payload = await api('/api/login', {
+        method: 'POST',
+        body: { account: accountValue, password: passwordValue },
+      });
       await onLogin(payload.user);
     } catch (err) {
       setError(err.message);
@@ -186,11 +194,25 @@ function LoginScreen({ onLogin }) {
         <form onSubmit={submit} className="login-form">
           <label>
             Tài khoản administrator
-            <input value={account} onChange={(event) => setAccount(event.target.value)} type="text" autoComplete="username" required />
+            <input
+              name="account"
+              value={account}
+              onChange={(event) => setAccount(event.target.value)}
+              type="text"
+              autoComplete="username"
+              required
+            />
           </label>
           <label>
             Mật khẩu
-            <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required />
+            <input
+              name="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              type="password"
+              autoComplete="current-password"
+              required
+            />
           </label>
           {error && <div className="error-box">{error}</div>}
           <button type="submit" disabled={busy} className="primary-button full">
