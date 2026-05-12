@@ -83,7 +83,12 @@ foreach (glob($sitesRoot.DIRECTORY_SEPARATOR.'*', GLOB_ONLYDIR) ?: [] as $direct
     ];
 }
 
-usort($items, static fn (array $a, array $b): int => strcasecmp($a['domain'], $b['domain']));
+usort($items, function ($a, $b) {
+    $domainA = isset($a['domain']) ? (string) $a['domain'] : '';
+    $domainB = isset($b['domain']) ? (string) $b['domain'] : '';
+
+    return strcasecmp($domainA, $domainB);
+});
 
 echo json_encode(['data' => $items], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 PHP, [
