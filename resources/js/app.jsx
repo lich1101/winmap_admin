@@ -102,6 +102,36 @@ function websiteUsesSharedApiKey(site, setup) {
   return Boolean(!site?.has_api_key && setup?.has_default_api_key);
 }
 
+function websiteCredentialSummary(site, setup) {
+  if (site?.uses_default_credentials) {
+    return setup?.default_website_username
+      ? `Mặc định (${setup.default_website_username})`
+      : 'Mặc định hệ thống';
+  }
+
+  return site?.website_username || 'Credential riêng';
+}
+
+function websitePasswordSummary(site, setup) {
+  if (site?.uses_default_credentials) {
+    return setup?.has_default_website_password ? 'Đã lưu mật khẩu mặc định' : 'Chưa có mật khẩu mặc định';
+  }
+
+  return site?.has_website_password ? 'Đã lưu mật khẩu riêng' : 'Chưa có mật khẩu riêng';
+}
+
+function websiteApiKeySummary(site, setup) {
+  if (site?.has_api_key) {
+    return 'Key riêng đã lưu';
+  }
+
+  if (setup?.has_default_api_key) {
+    return 'Đang dùng key mặc định hệ thống';
+  }
+
+  return 'Chưa có API key';
+}
+
 const maintenanceOperations = {
   'clear-cache': {
     route: 'clear-cache',
@@ -1046,74 +1076,113 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
         </div>
       </div>
 
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Website</th>
-              <th>Hiện tại</th>
-              <th>Quota</th>
-              <th>Trạng thái</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {websites.length === 0 && (
-              <tr><td colSpan="5" className="empty-cell">Chưa có website nào. Chạy setup hoặc quét multisite để bắt đầu.</td></tr>
-            )}
-            {websites.map((site) => (
-              <tr key={site.id} className={site.last_is_blocked ? 'danger-row' : (site.last_is_warning ? 'warn-row' : '')}>
-                <td>
+      <div className="website-list">
+        <div className="website-list-head">
+          <span>Website</span>
+          <span>Hiện tại</span>
+          <span>Quota</span>
+          <span>Trạng thái</span>
+          <span className="website-list-head-actions">Thao tác</span>
+        </div>
+
+        {websites.length === 0 && (
+          <div className="empty-cell website-empty">Chưa có website nào. Chạy setup hoặc quét multisite để bắt đầu.</div>
+        )}
+
+        {websites.map((site) => {
+          const statusMessage = site.last_error
+            ? `Usage lỗi: ${site.last_error}`
+            : (site.last_sync_status === 'error' ? `Sync quota lỗi: ${site.last_sync_error}` : '');
+
+          return (
+            <article
+              key={site.id}
+              className={`website-row ${site.last_is_blocked ? 'danger-row' : (site.last_is_warning ? 'warn-row' : '')}`}
+            >
+              <div className="website-cell website-cell-main">
+                <div className="website-name-block">
                   <strong>
                     <a className="website-link" href={websiteHomeUrl(site)} target="_blank" rel="noreferrer noopener">
                       {site.name}
                     </a>
                   </strong>
                   <small>{site.domain}</small>
-                  <small>
-                    {site.uses_default_credentials
-                      ? `Credential: mặc định${setup.default_website_username ? ` (${setup.default_website_username})` : ''} · ${setup.has_default_website_password ? 'đã lưu mật khẩu mặc định' : 'chưa có mật khẩu mặc định'}`
-                      : `Credential riêng: ${site.website_username || 'chưa điền'} · ${site.has_website_password ? 'đã lưu mật khẩu riêng' : 'chưa có mật khẩu riêng'}`}
-                  </small>
-                  {websiteUsesSharedApiKey(site, setup) ? (
-                    <small className="muted-note">API key: đang dùng key mặc định của hệ thống cho quota sync và bảo trì từ xa.</small>
-                  ) : null}
-                  {websiteHasEffectiveApiKey(site, setup) ? null : (
-                    <small className="muted-alert">
-                      {websiteHasCredentialFallback(site, setup)
-                        ? 'Chưa có API key nên chưa đẩy quota tự động xuống site. Việc đọc usage sẽ fallback qua credential quản trị đã lưu nếu endpoint khóa key.'
-                        : 'Chưa có API key nên chưa đẩy quota tự động xuống site. Nếu endpoint khóa key thì cần lưu API key hoặc credential quản trị để đọc usage.'}
+                </div>
+
+                <div className="website-meta-grid">
+                  <div className="website-meta-item">
+                    <span>Credential</span>
+                    <strong>{websiteCredentialSummary(site, setup)}</strong>
+                    <small>{websitePasswordSummary(site, setup)}</small>
+                  </div>
+                  <div className="website-meta-item">
+                    <span>API key</span>
+                    <strong>{websiteApiKeySummary(site, setup)}</strong>
+                    <small>
+                      {websiteHasEffectiveApiKey(site, setup)
+                        ? 'Dùng được cho quota sync và bảo trì từ xa.'
+                        : 'Chưa đủ để quota sync hoặc bảo trì từ xa.'}
                     </small>
-                  )}
-                </td>
-                <td>
-                  <strong>{site.last_project_human}</strong>
-                  <small>Dung lượng hiện tại: Disk {site.last_disk_human} · DB {site.last_database_human}</small>
-                  <UsageBar percent={site.last_usage_percent || 0} />
-                  <small>Tài khoản hiện tại: {site.last_user_count || 0}{site.user_limit > 0 ? ` / ${site.user_limit}` : ' / không giới hạn'}</small>
-                </td>
-                <td>
-                  <strong>{site.quota_human}</strong>
-                  <small>{site.user_limit > 0 ? `${site.user_limit} user` : 'Không giới hạn user'}</small>
-                  <small>Cảnh báo từ {site.warning_threshold_percent}%</small>
-                </td>
-                <td>
-                  <StatusPill site={site} />
-                  <small>{site.last_checked_at ? new Date(site.last_checked_at).toLocaleString('vi-VN') : 'Chưa lấy số liệu'}</small>
-                  {site.last_error ? <small className="muted-alert">Usage lỗi: {site.last_error}</small> : null}
-                  {site.last_sync_status === 'error' && <small className="muted-alert">Sync quota lỗi: {site.last_sync_error}</small>}
-                </td>
-                <td className="row-actions">
-                  <button onClick={() => onRefresh(site.id)} title="Refresh">
-                    {refreshingId === site.id ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-                  </button>
-                  <button onClick={() => onEdit(site)} title="Sửa"><Save size={16} /></button>
-                  <button onClick={() => onDelete(site.id)} title="Xóa"><Trash2 size={16} /></button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  </div>
+                </div>
+
+                {websiteHasEffectiveApiKey(site, setup) ? null : (
+                  <small className="muted-alert website-inline-note">
+                    {websiteHasCredentialFallback(site, setup)
+                      ? 'Đọc usage sẽ fallback qua credential quản trị nếu endpoint đang khóa key.'
+                      : 'Cần lưu API key hoặc credential quản trị để đọc usage khi endpoint bị khóa.'}
+                  </small>
+                )}
+              </div>
+
+              <div className="website-cell website-cell-usage">
+                <strong>{site.last_project_human}</strong>
+                <small>Tổng dung lượng hiện tại</small>
+                <div className="website-stat-list">
+                  <div className="website-stat-item">
+                    <span>Disk</span>
+                    <strong>{site.last_disk_human}</strong>
+                  </div>
+                  <div className="website-stat-item">
+                    <span>DB</span>
+                    <strong>{site.last_database_human}</strong>
+                  </div>
+                </div>
+                <UsageBar percent={site.last_usage_percent || 0} />
+                <small>Tài khoản: {site.last_user_count || 0}{site.user_limit > 0 ? ` / ${site.user_limit}` : ' / không giới hạn'}</small>
+              </div>
+
+              <div className="website-cell website-cell-quota">
+                <strong>{site.quota_human}</strong>
+                <small>Dung lượng được phép</small>
+                <div className="website-stat-list compact">
+                  <div className="website-stat-item">
+                    <span>Giới hạn user</span>
+                    <strong>{site.user_limit > 0 ? site.user_limit : 'Không giới hạn'}</strong>
+                  </div>
+                  <div className="website-stat-item">
+                    <span>Cảnh báo</span>
+                    <strong>{site.warning_threshold_percent}%</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div className="website-cell website-cell-status">
+                <StatusPill site={site} />
+                <small>{site.last_checked_at ? new Date(site.last_checked_at).toLocaleString('vi-VN') : 'Chưa lấy số liệu'}</small>
+                {statusMessage ? <small className="muted-alert website-status-note">{statusMessage}</small> : <small className="website-status-note">Không có lỗi đồng bộ gần nhất.</small>}
+              </div>
+
+              <div className="website-cell row-actions">
+                <button onClick={() => onRefresh(site.id)} title="Refresh">
+                  {refreshingId === site.id ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                </button>
+                <button onClick={() => onEdit(site)} title="Sửa"><Save size={16} /></button>
+                <button onClick={() => onDelete(site.id)} title="Xóa"><Trash2 size={16} /></button>
+              </div>
+            </article>
+          );
+        })}
       </div>
     </section>
   );

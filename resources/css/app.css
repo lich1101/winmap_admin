@@ -161,6 +161,83 @@ table { width: 100%; border-collapse: collapse; }
 th { text-align: left; color: #7a8799; font-size: 12px; text-transform: uppercase; letter-spacing: .12em; padding: 12px 10px; }
 td { padding: 14px 10px; border-top: 1px solid var(--line); vertical-align: middle; }
 td strong { display: block; }
+.website-list { display: grid; gap: 0; }
+.website-list-head,
+.website-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 2.15fr) minmax(160px, 1.18fr) minmax(130px, .92fr) minmax(180px, 1.08fr) 104px;
+  gap: 18px;
+}
+.website-list-head {
+  padding: 0 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.website-list-head span {
+  color: #7a8799;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-weight: 800;
+}
+.website-list-head-actions { text-align: right; }
+.website-row {
+  padding: 16px 10px;
+  border-bottom: 1px solid var(--line);
+  align-items: start;
+}
+.website-row:last-child { border-bottom: 0; }
+.website-cell { min-width: 0; display: grid; gap: 8px; }
+.website-cell small { color: var(--muted); display: block; }
+.website-name-block { display: grid; gap: 2px; }
+.website-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.website-meta-item,
+.website-stat-item {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+}
+.website-meta-item span,
+.website-stat-item span {
+  display: block;
+  margin-bottom: 5px;
+  color: #7a8799;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 800;
+}
+.website-meta-item strong,
+.website-stat-item strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+.website-stat-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.website-stat-list.compact { grid-template-columns: 1fr; }
+.website-cell-usage .usage-bar { width: 100%; min-width: 0; }
+.website-cell-status { align-content: start; }
+.website-cell-status .pill { margin-bottom: 2px; }
+.website-row .row-actions { align-self: center; }
+.website-inline-note,
+.website-status-note { line-height: 1.5; }
+.website-status-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.website-empty {
+  padding: 40px 16px;
+  border-top: 0;
+}
 .website-link { color: var(--ink); text-decoration: none; border-bottom: 1px solid transparent; transition: color .15s ease, border-color .15s ease; }
 .website-link:hover { color: var(--blue); border-color: rgba(52, 90, 232, .35); }
 .empty-cell { color: var(--muted); text-align: center; padding: 42px 16px; }
@@ -271,6 +348,16 @@ td strong { display: block; }
   .wizard-layout { grid-template-columns: 1fr; }
   .wizard-sidebar { position: static; }
   .form-grid.three-up { grid-template-columns: 1fr; }
+  .website-list-head,
+  .website-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .website-list-head { display: none; }
+  .website-meta-grid,
+  .website-stat-list { grid-template-columns: 1fr; }
+  .website-row { padding: 18px 0; }
+  .website-row .row-actions { justify-content: flex-start; }
   .provision-step-head { flex-direction: column; align-items: stretch; }
 }
 @media (max-width: 760px) {
