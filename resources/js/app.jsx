@@ -132,6 +132,26 @@ function websiteApiKeySummary(site, setup) {
   return 'Chưa có API key';
 }
 
+function websiteStorageLimitLabel(site) {
+  return site?.quota_bytes > 0 ? site.quota_human : 'Không giới hạn';
+}
+
+function websiteUserLimitLabel(site) {
+  return site?.user_limit > 0 ? String(site.user_limit) : 'Không giới hạn';
+}
+
+function websiteStorageRatio(site) {
+  return `${site?.last_project_human || '0 B'} / ${websiteStorageLimitLabel(site)}`;
+}
+
+function websiteUserRatio(site) {
+  return `${site?.last_user_count || 0} / ${websiteUserLimitLabel(site)}`;
+}
+
+function formatDateTime(value) {
+  return value ? new Date(value).toLocaleString('vi-VN') : '';
+}
+
 const maintenanceOperations = {
   'clear-cache': {
     route: 'clear-cache',
@@ -1079,8 +1099,7 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
       <div className="website-list">
         <div className="website-list-head">
           <span>Website</span>
-          <span>Hiện tại</span>
-          <span>Quota</span>
+          <span>Sử dụng</span>
           <span>Trạng thái</span>
           <span className="website-list-head-actions">Thao tác</span>
         </div>
@@ -1093,6 +1112,8 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
           const statusMessage = site.last_error
             ? `Usage lỗi: ${site.last_error}`
             : (site.last_sync_status === 'error' ? `Sync quota lỗi: ${site.last_sync_error}` : '');
+          const lastChecked = formatDateTime(site.last_checked_at);
+          const lastSynced = formatDateTime(site.last_synced_at);
 
           return (
             <article
@@ -1109,21 +1130,10 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
                   <small>{site.domain}</small>
                 </div>
 
-                <div className="website-meta-grid">
-                  <div className="website-meta-item">
-                    <span>Credential</span>
-                    <strong>{websiteCredentialSummary(site, setup)}</strong>
-                    <small>{websitePasswordSummary(site, setup)}</small>
-                  </div>
-                  <div className="website-meta-item">
-                    <span>API key</span>
-                    <strong>{websiteApiKeySummary(site, setup)}</strong>
-                    <small>
-                      {websiteHasEffectiveApiKey(site, setup)
-                        ? 'Dùng được cho quota sync và bảo trì từ xa.'
-                        : 'Chưa đủ để quota sync hoặc bảo trì từ xa.'}
-                    </small>
-                  </div>
+                <div className="website-meta-inline">
+                  <span className="website-meta-chip"><strong>Credential</strong>{websiteCredentialSummary(site, setup)}</span>
+                  <span className="website-meta-chip"><strong>Mật khẩu</strong>{websitePasswordSummary(site, setup)}</span>
+                  <span className="website-meta-chip"><strong>API key</strong>{websiteApiKeySummary(site, setup)}</span>
                 </div>
 
                 {websiteHasEffectiveApiKey(site, setup) ? null : (
@@ -1136,41 +1146,49 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
               </div>
 
               <div className="website-cell website-cell-usage">
-                <strong>{site.last_project_human}</strong>
-                <small>Tổng dung lượng hiện tại</small>
-                <div className="website-stat-list">
-                  <div className="website-stat-item">
-                    <span>Disk</span>
-                    <strong>{site.last_disk_human}</strong>
-                  </div>
-                  <div className="website-stat-item">
-                    <span>DB</span>
-                    <strong>{site.last_database_human}</strong>
-                  </div>
+                <div className="usage-card">
+                  <span className="usage-card-label">Dung lượng</span>
+                  <button type="button" className="usage-detail-trigger">
+                    <strong>{websiteStorageRatio(site)}</strong>
+                    <small>{site.quota_bytes > 0 ? `${site.last_usage_percent || 0}% quota` : 'Không giới hạn quota'}</small>
+                    <div className="usage-tooltip" role="tooltip">
+                      <span className="usage-tooltip-title">Chi tiết dung lượng</span>
+                      <div className="usage-tooltip-grid">
+                        <div>
+                          <span>Tổng</span>
+                          <strong>{site.last_project_human}</strong>
+                        </div>
+                        <div>
+                          <span>Quota</span>
+                          <strong>{websiteStorageLimitLabel(site)}</strong>
+                        </div>
+                        <div>
+                          <span>Disk</span>
+                          <strong>{site.last_disk_human}</strong>
+                        </div>
+                        <div>
+                          <span>Database</span>
+                          <strong>{site.last_database_human}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                  <UsageBar percent={site.quota_bytes > 0 ? (site.last_usage_percent || 0) : 0} />
+                  <small>Cảnh báo từ {site.warning_threshold_percent}%</small>
                 </div>
-                <UsageBar percent={site.last_usage_percent || 0} />
-                <small>Tài khoản: {site.last_user_count || 0}{site.user_limit > 0 ? ` / ${site.user_limit}` : ' / không giới hạn'}</small>
-              </div>
 
-              <div className="website-cell website-cell-quota">
-                <strong>{site.quota_human}</strong>
-                <small>Dung lượng được phép</small>
-                <div className="website-stat-list compact">
-                  <div className="website-stat-item">
-                    <span>Giới hạn user</span>
-                    <strong>{site.user_limit > 0 ? site.user_limit : 'Không giới hạn'}</strong>
-                  </div>
-                  <div className="website-stat-item">
-                    <span>Cảnh báo</span>
-                    <strong>{site.warning_threshold_percent}%</strong>
-                  </div>
+                <div className="usage-card">
+                  <span className="usage-card-label">Người dùng</span>
+                  <strong className="usage-ratio-text">{websiteUserRatio(site)}</strong>
+                  <small>{site.user_limit > 0 ? 'Đang dùng / giới hạn user' : 'Chưa đặt giới hạn user'}</small>
                 </div>
               </div>
 
               <div className="website-cell website-cell-status">
                 <StatusPill site={site} />
-                <small>{site.last_checked_at ? new Date(site.last_checked_at).toLocaleString('vi-VN') : 'Chưa lấy số liệu'}</small>
-                {statusMessage ? <small className="muted-alert website-status-note">{statusMessage}</small> : <small className="website-status-note">Không có lỗi đồng bộ gần nhất.</small>}
+                <small>{lastChecked ? `Đã kiểm tra ${lastChecked}` : 'Chưa lấy số liệu'}</small>
+                <small>{lastSynced ? `Đồng bộ quota ${lastSynced}` : 'Chưa có lần đồng bộ quota gần nhất'}</small>
+                {statusMessage ? <small className="muted-alert website-status-note">{statusMessage}</small> : null}
               </div>
 
               <div className="website-cell row-actions">

@@ -165,7 +165,7 @@ td strong { display: block; }
 .website-list-head,
 .website-row {
   display: grid;
-  grid-template-columns: minmax(220px, 2.15fr) minmax(160px, 1.18fr) minmax(130px, .92fr) minmax(180px, 1.08fr) 104px;
+  grid-template-columns: minmax(250px, 1.55fr) minmax(270px, 1.2fr) minmax(190px, .95fr) 104px;
   gap: 18px;
 }
 .website-list-head {
@@ -189,40 +189,119 @@ td strong { display: block; }
 .website-cell { min-width: 0; display: grid; gap: 8px; }
 .website-cell small { color: var(--muted); display: block; }
 .website-name-block { display: grid; gap: 2px; }
-.website-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.website-meta-inline { display: flex; flex-wrap: wrap; gap: 8px; }
+.website-meta-chip {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
-}
-.website-meta-item,
-.website-stat-item {
-  padding: 10px 12px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
   background: var(--surface-strong);
+  color: #55657a;
+  font-size: 13px;
+  line-height: 1.35;
 }
-.website-meta-item span,
-.website-stat-item span {
-  display: block;
-  margin-bottom: 5px;
-  color: #7a8799;
+.website-meta-chip strong {
+  color: #77869a;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: .08em;
+}
+.website-cell-usage {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+.usage-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, #fbfcff 0%, #f5f8fc 100%);
+}
+.usage-card-label {
+  color: #7a8799;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
   font-weight: 800;
 }
-.website-meta-item strong,
-.website-stat-item strong {
+.usage-ratio-text,
+.usage-detail-trigger strong {
+  display: block;
+  font-size: 20px;
+  line-height: 1.15;
+  letter-spacing: -.03em;
+}
+.usage-detail-trigger {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: help;
+}
+.usage-detail-trigger small {
+  position: relative;
+  width: max-content;
+  padding-bottom: 2px;
+  border-bottom: 1px dashed #bdc8da;
+}
+.usage-tooltip {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 12px);
+  z-index: 6;
+  width: 250px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid #d8e1ef;
+  background: rgba(15, 23, 38, .98);
+  color: #f3f7ff;
+  box-shadow: 0 16px 36px rgba(8, 15, 28, .26);
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+}
+.usage-detail-trigger:hover .usage-tooltip,
+.usage-detail-trigger:focus-visible .usage-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+.usage-tooltip-title {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: #9cb1d7;
+  font-weight: 800;
+}
+.usage-tooltip-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.usage-tooltip-grid span {
+  display: block;
+  margin-bottom: 4px;
+  color: #9cb1d7;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 700;
+}
+.usage-tooltip-grid strong {
   font-size: 14px;
   line-height: 1.35;
 }
-.website-stat-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-.website-stat-list.compact { grid-template-columns: 1fr; }
-.website-cell-usage .usage-bar { width: 100%; min-width: 0; }
+.website-cell-usage .usage-bar { width: 100%; min-width: 0; margin-top: 0; }
 .website-cell-status { align-content: start; }
 .website-cell-status .pill { margin-bottom: 2px; }
 .website-row .row-actions { align-self: center; }
@@ -354,8 +433,8 @@ td strong { display: block; }
     gap: 12px;
   }
   .website-list-head { display: none; }
-  .website-meta-grid,
-  .website-stat-list { grid-template-columns: 1fr; }
+  .website-cell-usage,
+  .usage-tooltip-grid { grid-template-columns: 1fr; }
   .website-row { padding: 18px 0; }
   .website-row .row-actions { justify-content: flex-start; }
   .provision-step-head { flex-direction: column; align-items: stretch; }
