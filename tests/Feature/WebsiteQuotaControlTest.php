@@ -107,6 +107,55 @@ class WebsiteQuotaControlTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_admin_store_syncs_quota_to_drupal_site_with_setup_default_api_key(): void
+    {
+        Http::fake([
+            'https://enter.winmap.vn/application/site-usage/quota/config' => Http::response([
+                'status' => 'success',
+                'quota' => [
+                    'is_blocked' => false,
+                    'is_warning' => false,
+                ],
+            ], 200),
+        ]);
+
+        SetupConfiguration::query()->create([
+            'is_completed' => true,
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'enter.winmap.vn',
+            'default_api_key' => 'shared-key-123',
+        ]);
+
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/websites', [
+            'name' => 'Enter',
+            'domain' => 'enter.winmap.vn',
+            'usage_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/json',
+            'config_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/quota/config',
+            'quota_gb' => 10,
+            'warning_threshold_percent' => 90,
+            'enabled' => true,
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.domain', 'enter.winmap.vn')
+            ->assertJsonPath('data.last_sync_status', 'ok');
+
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://enter.winmap.vn/application/site-usage/quota/config'
+                && (($request->header('X-Winmap-Site-Usage-Key')[0] ?? null) === 'shared-key-123');
+        });
+    }
+
     public function test_admin_can_refresh_all_websites_usage(): void
     {
         SetupConfiguration::query()->create([
@@ -442,7 +491,8 @@ HTML;
 
         $response->assertOk()
             ->assertJsonPath('completed', false)
-            ->assertJsonPath('config.server_port', 22);
+            ->assertJsonPath('config.server_port', 22)
+            ->assertJsonPath('config.has_default_api_key', false);
     }
 
     public function test_dashboard_is_blocked_until_setup_is_completed(): void
@@ -544,6 +594,7 @@ HTML;
             'auth_site_domain' => 'enter.winmap.vn',
             'default_website_username' => 'administrator',
             'default_website_password' => 'shared-secret',
+            'default_api_key' => 'shared-key-123',
             'websites' => [
                 [
                     'name' => 'Enter',
@@ -559,7 +610,8 @@ HTML;
 
         $response->assertOk()
             ->assertJsonPath('completed', true)
-            ->assertJsonPath('config.auth_site_domain', 'enter.winmap.vn');
+            ->assertJsonPath('config.auth_site_domain', 'enter.winmap.vn')
+            ->assertJsonPath('config.has_default_api_key', true);
 
         $setup = SetupConfiguration::query()->first();
         $website = MonitoredWebsite::query()->where('domain', 'enter.winmap.vn')->first();
@@ -569,10 +621,60 @@ HTML;
         $this->assertSame('10.10.10.10', $setup->server_host);
         $this->assertSame('administrator', $setup->default_website_username);
         $this->assertTrue($setup->has_default_website_password);
+        $this->assertSame('shared-key-123', $setup->default_api_key);
+        $this->assertTrue($setup->has_default_api_key);
         $this->assertNotNull($website);
         $this->assertNull($website->website_username);
         $this->assertFalse($website->has_website_password);
         $this->assertTrue($website->uses_default_credentials);
+    }
+
+    public function test_admin_can_run_remote_operation_with_setup_default_api_key(): void
+    {
+        SetupConfiguration::query()->create([
+            'is_completed' => true,
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'enter.winmap.vn',
+            'default_api_key' => 'shared-key-123',
+        ]);
+
+        $website = MonitoredWebsite::query()->create([
+            'name' => 'Enter',
+            'domain' => 'enter.winmap.vn',
+            'usage_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/json',
+            'config_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/quota/config',
+            'enabled' => true,
+            'quota_bytes' => 1024 * 1024 * 1024,
+            'warning_threshold_percent' => 85,
+        ]);
+
+        Http::fake([
+            'https://enter.winmap.vn/application/site-usage/cache/clear' => Http::response([
+                'status' => 'success',
+                'message' => 'Cache cleared.',
+            ], 200),
+        ]);
+
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->postJson("/api/websites/{$website->id}/clear-cache");
+
+        $response->assertOk()
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('remote.message', 'Cache cleared.');
+
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://enter.winmap.vn/application/site-usage/cache/clear'
+                && (($request->header('X-Winmap-Site-Usage-Key')[0] ?? null) === 'shared-key-123');
+        });
     }
 
     public function test_setup_can_mix_shared_default_credential_with_site_override(): void

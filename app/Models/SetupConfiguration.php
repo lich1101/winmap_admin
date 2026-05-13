@@ -17,11 +17,12 @@ use Illuminate\Database\Eloquent\Model;
     'auth_site_domain',
     'default_website_username',
     'default_website_password',
+    'default_api_key',
 ])]
-#[Hidden(['server_password', 'default_website_password'])]
+#[Hidden(['server_password', 'default_website_password', 'default_api_key'])]
 class SetupConfiguration extends Model
 {
-    protected $appends = ['has_server_password', 'has_default_website_password'];
+    protected $appends = ['has_server_password', 'has_default_website_password', 'has_default_api_key'];
 
     protected function casts(): array
     {
@@ -30,6 +31,7 @@ class SetupConfiguration extends Model
             'server_port' => 'integer',
             'server_password' => 'encrypted',
             'default_website_password' => 'encrypted',
+            'default_api_key' => 'encrypted',
         ];
     }
 
@@ -41,5 +43,10 @@ class SetupConfiguration extends Model
     public function getHasDefaultWebsitePasswordAttribute(): bool
     {
         return ! empty($this->default_website_password);
+    }
+
+    public function getHasDefaultApiKeyAttribute(): bool
+    {
+        return ! empty($this->default_api_key);
     }
 }

@@ -33,6 +33,9 @@ class SetupConfigurationService
         if (($resolved['default_website_password'] ?? '') === '' && $setup->exists && ! empty($setup->default_website_password)) {
             $resolved['default_website_password'] = $setup->default_website_password;
         }
+        if (($resolved['default_api_key'] ?? '') === '' && $setup->exists && ! empty($setup->default_api_key)) {
+            $resolved['default_api_key'] = $setup->default_api_key;
+        }
 
         $setup->fill($resolved);
 
@@ -51,6 +54,9 @@ class SetupConfigurationService
         }
         if (($attributes['default_website_password'] ?? '') === '' && $setup->exists) {
             unset($attributes['default_website_password']);
+        }
+        if (($attributes['default_api_key'] ?? '') === '' && $setup->exists) {
+            unset($attributes['default_api_key']);
         }
 
         $setup->fill($attributes);

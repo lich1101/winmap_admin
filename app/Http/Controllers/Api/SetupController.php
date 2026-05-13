@@ -80,6 +80,7 @@ class SetupController extends Controller
             'auth_site_domain' => ['required', 'string', 'max:255'],
             'default_website_username' => ['nullable', 'string', 'max:255'],
             'default_website_password' => ['nullable', 'string', 'max:2000'],
+            'default_api_key' => ['nullable', 'string', 'max:2048'],
             'websites' => ['required', 'array', 'min:1'],
             'websites.*.name' => ['required', 'string', 'max:255'],
             'websites.*.domain' => ['required', 'string', 'max:255'],
@@ -124,6 +125,7 @@ class SetupController extends Controller
                     'auth_site_domain' => $payload['auth_site_domain'],
                     'default_website_username' => trim((string) ($payload['default_website_username'] ?? '')) ?: null,
                     'default_website_password' => trim((string) ($payload['default_website_password'] ?? '')),
+                    'default_api_key' => trim((string) ($payload['default_api_key'] ?? '')) ?: null,
                 ]), true);
 
                 foreach ($payload['websites'] as $websiteInput) {
@@ -226,6 +228,7 @@ class SetupController extends Controller
             'auth_site_domain' => $setup->auth_site_domain,
             'default_website_username' => $setup->default_website_username,
             'has_default_website_password' => (bool) $setup->has_default_website_password,
+            'has_default_api_key' => (bool) $setup->has_default_api_key,
         ];
     }
 
@@ -261,8 +264,12 @@ class SetupController extends Controller
         if ($exception instanceof QueryException) {
             $message = $exception->getMessage();
 
-            if (str_contains($message, 'default_website_username') || str_contains($message, 'default_website_password')) {
-                return 'Database của winmap_admin chưa chạy migration mới cho credential mặc định. Cần chạy php artisan migrate --force rồi thử lại.';
+            if (
+                str_contains($message, 'default_website_username')
+                || str_contains($message, 'default_website_password')
+                || str_contains($message, 'default_api_key')
+            ) {
+                return 'Database của winmap_admin chưa chạy migration mới cho credential hoặc API key mặc định. Cần chạy php artisan migrate --force rồi thử lại.';
             }
         }
 

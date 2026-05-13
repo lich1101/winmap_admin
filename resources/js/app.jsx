@@ -94,6 +94,14 @@ function websiteHasCredentialFallback(site, setup) {
   return Boolean(site?.website_username && site?.has_website_password);
 }
 
+function websiteHasEffectiveApiKey(site, setup) {
+  return Boolean(site?.has_api_key || setup?.has_default_api_key);
+}
+
+function websiteUsesSharedApiKey(site, setup) {
+  return Boolean(!site?.has_api_key && setup?.has_default_api_key);
+}
+
 const maintenanceOperations = {
   'clear-cache': {
     route: 'clear-cache',
@@ -306,6 +314,7 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
   const [authSiteDomain, setAuthSiteDomain] = useState(initialConfig.auth_site_domain || initialWebsites[0]?.domain || '');
   const [defaultAccount, setDefaultAccount] = useState(initialConfig.default_website_username || '');
   const [defaultPassword, setDefaultPassword] = useState('');
+  const [defaultApiKey, setDefaultApiKey] = useState('');
   const [sites, setSites] = useState(initialWebsites);
   const [serverPreview, setServerPreview] = useState(null);
   const [error, setError] = useState('');
@@ -408,6 +417,7 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
           auth_site_domain: authSiteDomain,
           default_website_username: defaultAccount,
           default_website_password: defaultPassword || '',
+          default_api_key: defaultApiKey || '',
           websites: sites.map((site) => ({
             name: site.name,
             domain: site.domain,
@@ -542,12 +552,13 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
 
               <section className="site-defaults">
                 <div>
-                  <strong>Credential mặc định</strong>
-                  <p>Đây là tài khoản administrator dùng chung. Website nào cùng credential thì không cần nhập riêng ở từng dòng.</p>
+                  <strong>Credential và API key mặc định</strong>
+                  <p>Nếu toàn bộ site dùng chung tài khoản quản trị và cùng một `winmap_site_usage_api_key`, chỉ cần nhập một lần ở đây.</p>
                 </div>
-                <div className="form-grid three-up">
+                <div className="form-grid two-up">
                   <label>Tài khoản mặc định<input value={defaultAccount} onChange={(event) => setDefaultAccount(event.target.value)} placeholder="administrator" /></label>
                   <label>Mật khẩu mặc định<input value={defaultPassword} onChange={(event) => setDefaultPassword(event.target.value)} type="password" placeholder={initialConfig.has_default_website_password ? 'Để trống để giữ mật khẩu mặc định đã lưu' : 'Mật khẩu cho nhiều site'} /></label>
+                  <label>API key mặc định<input value={defaultApiKey} onChange={(event) => setDefaultApiKey(event.target.value)} placeholder={initialConfig.has_default_api_key ? 'Để trống để giữ API key mặc định đã lưu' : 'X-Winmap-Site-Usage-Key dùng chung'} /></label>
                   <div className="button-stack">
                     <button type="button" className="ghost-button" onClick={applyDefaultsToSites}><KeyRound size={16} />Cho toàn bộ dùng mặc định</button>
                   </div>
@@ -749,14 +760,14 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
 
   async function runMaintenanceBatch(operation) {
     const config = maintenanceOperations[operation];
-    const targets = websites.filter((site) => site.enabled && site.has_api_key);
-    const skipped = websites.filter((site) => site.enabled && !site.has_api_key).length;
+    const targets = websites.filter((site) => site.enabled && websiteHasEffectiveApiKey(site, setup));
+    const skipped = websites.filter((site) => site.enabled && !websiteHasEffectiveApiKey(site, setup)).length;
 
     if (!config || maintenanceBatch.running) {
       return;
     }
     if (targets.length === 0) {
-      setError('Không có website nào đủ điều kiện chạy bảo trì. Cần bật website và có API key.');
+      setError('Không có website nào đủ điều kiện chạy bảo trì. Cần bật website và có API key riêng hoặc API key mặc định trong setup.');
       return;
     }
 
@@ -828,7 +839,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
       success,
       errors,
     }));
-    setNotice(`${config.doneLabel} ${targets.length} website: ${success} thành công, ${errors} lỗi${skipped ? `, bỏ qua ${skipped} site thiếu API key` : ''}.`);
+    setNotice(`${config.doneLabel} ${targets.length} website: ${success} thành công, ${errors} lỗi${skipped ? `, bỏ qua ${skipped} site thiếu API key hiệu lực` : ''}.`);
     await loadDashboard();
   }
 
@@ -897,6 +908,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
             />
             <div className="side-stack">
               <MaintenanceBatchPanel
+                setup={setup}
                 websites={websites}
                 batch={maintenanceBatch}
                 onRun={runMaintenanceBatch}
@@ -909,6 +921,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
 
       {editing !== null && (
         <WebsiteDrawer
+          setup={setup}
           website={editing}
           onClose={() => setEditing(null)}
           onSaved={async () => {
@@ -931,9 +944,9 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
   );
 }
 
-function MaintenanceBatchPanel({ websites, batch, onRun }) {
-  const readyCount = websites.filter((site) => site.enabled && site.has_api_key).length;
-  const missingKeyCount = websites.filter((site) => site.enabled && !site.has_api_key).length;
+function MaintenanceBatchPanel({ setup, websites, batch, onRun }) {
+  const readyCount = websites.filter((site) => site.enabled && websiteHasEffectiveApiKey(site, setup)).length;
+  const missingKeyCount = websites.filter((site) => site.enabled && !websiteHasEffectiveApiKey(site, setup)).length;
   const percent = batch.total > 0 ? Math.round((batch.currentIndex / batch.total) * 100) : 0;
   const activeConfig = maintenanceOperations[batch.operation];
 
@@ -1062,7 +1075,10 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
                       ? `Credential: mặc định${setup.default_website_username ? ` (${setup.default_website_username})` : ''} · ${setup.has_default_website_password ? 'đã lưu mật khẩu mặc định' : 'chưa có mật khẩu mặc định'}`
                       : `Credential riêng: ${site.website_username || 'chưa điền'} · ${site.has_website_password ? 'đã lưu mật khẩu riêng' : 'chưa có mật khẩu riêng'}`}
                   </small>
-                  {site.has_api_key ? null : (
+                  {websiteUsesSharedApiKey(site, setup) ? (
+                    <small className="muted-note">API key: đang dùng key mặc định của hệ thống cho quota sync và bảo trì từ xa.</small>
+                  ) : null}
+                  {websiteHasEffectiveApiKey(site, setup) ? null : (
                     <small className="muted-alert">
                       {websiteHasCredentialFallback(site, setup)
                         ? 'Chưa có API key nên chưa đẩy quota tự động xuống site. Việc đọc usage sẽ fallback qua credential quản trị đã lưu nếu endpoint khóa key.'
@@ -1166,7 +1182,7 @@ function TerminalPanel({ onError, projectPath }) {
   );
 }
 
-function WebsiteDrawer({ website, onClose, onSaved }) {
+function WebsiteDrawer({ website, setup, onClose, onSaved }) {
   const isEdit = Boolean(website.id);
   const [form, setForm] = useState({
     name: website.name || '',
@@ -1230,7 +1246,7 @@ function WebsiteDrawer({ website, onClose, onSaved }) {
           <label>Domain<input value={form.domain} onChange={(event) => update('domain', event.target.value)} placeholder="enter.winmap.vn" required /></label>
           <label>Usage endpoint<input value={form.usage_endpoint_url} onChange={(event) => update('usage_endpoint_url', event.target.value)} placeholder={endpointHint || 'https://domain/application/site-usage/json'} required /></label>
           <label>Quota config endpoint<input value={form.config_endpoint_url} onChange={(event) => update('config_endpoint_url', event.target.value)} placeholder={configEndpointHint || 'https://domain/application/site-usage/quota/config'} /></label>
-          <label>API key<input value={form.api_key} onChange={(event) => update('api_key', event.target.value)} placeholder={isEdit ? 'Bỏ trống để giữ key cũ' : 'X-Winmap-Site-Usage-Key'} /></label>
+          <label>API key riêng (tùy chọn)<input value={form.api_key} onChange={(event) => update('api_key', event.target.value)} placeholder={setup?.has_default_api_key ? (isEdit ? 'Bỏ trống để giữ key cũ hoặc dùng key mặc định' : 'Để trống để dùng API key mặc định trong setup') : (isEdit ? 'Bỏ trống để giữ key cũ' : 'X-Winmap-Site-Usage-Key')} /></label>
           <div className="form-grid two-up">
             <label>Tài khoản website<input value={form.website_username} onChange={(event) => update('website_username', event.target.value)} placeholder="administrator" /></label>
             <label>Mật khẩu website<input value={form.website_password} onChange={(event) => update('website_password', event.target.value)} type="password" placeholder={website.has_website_password ? 'Bỏ trống để giữ mật khẩu cũ' : 'Mật khẩu website'} /></label>
@@ -1240,7 +1256,11 @@ function WebsiteDrawer({ website, onClose, onSaved }) {
             <label>Số user được phép<input value={form.user_limit} onChange={(event) => update('user_limit', event.target.value)} type="number" min="0" step="1" placeholder="0 = không giới hạn" /></label>
             <label>Ngưỡng cảnh báo %<input value={form.warning_threshold_percent} onChange={(event) => update('warning_threshold_percent', event.target.value)} type="number" min="1" max="100" step="1" required /></label>
           </div>
-          <div className="info-strip">Khi lưu, admin sẽ đồng bộ dung lượng/user limit xuống `/application/site-usage/quota/config` và `/api/admin/package-config` của website.</div>
+          <div className="info-strip">
+            {setup?.has_default_api_key
+              ? 'Nếu website dùng chung key hệ thống thì có thể bỏ trống API key riêng. Khi lưu, admin sẽ dùng key mặc định để đồng bộ quota xuống quota endpoint, gọi /api/admin/package-config và chạy bảo trì từ xa.'
+              : 'Khi lưu, admin sẽ đồng bộ dung lượng/user limit xuống `/application/site-usage/quota/config` và `/api/admin/package-config` của website.'}
+          </div>
           <label>Ghi chú<textarea value={form.notes} onChange={(event) => update('notes', event.target.value)} rows="4" /></label>
           <label className="check-line"><input type="checkbox" checked={form.enabled} onChange={(event) => update('enabled', event.target.checked)} />Đang theo dõi</label>
           {error && <div className="error-box">{error}</div>}

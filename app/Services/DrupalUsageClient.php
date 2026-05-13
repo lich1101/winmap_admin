@@ -233,11 +233,12 @@ class DrupalUsageClient
     {
         $request = Http::acceptJson()
             ->timeout(20);
+        $headers = $this->headers($website);
 
         if ($bearerToken !== null && $bearerToken !== '') {
             $request = $request->withToken($bearerToken);
-        } elseif ($website->api_key) {
-            $request = $request->withHeaders(['X-Winmap-Site-Usage-Key' => $website->api_key]);
+        } elseif ($headers !== []) {
+            $request = $request->withHeaders($headers);
         }
 
         return $request->get($website->usage_endpoint_url);
@@ -353,8 +354,10 @@ class DrupalUsageClient
 
     private function headers(MonitoredWebsite $website): array
     {
-        return $website->api_key
-            ? ['X-Winmap-Site-Usage-Key' => $website->api_key]
+        $apiKey = $this->effectiveApiKey($website);
+
+        return $apiKey !== null
+            ? ['X-Winmap-Site-Usage-Key' => $apiKey]
             : [];
     }
 
@@ -466,16 +469,17 @@ class DrupalUsageClient
     private function postOperation(MonitoredWebsite $website, string $operation, string $suffix, int $timeout): array
     {
         $endpoint = $this->operationEndpointUrl($website, $suffix);
+        $headers = $this->headers($website);
         if ($endpoint === '') {
             throw new RuntimeException('Thiếu usage endpoint để chạy thao tác '.$operation.'.');
         }
-        if (! $website->api_key) {
+        if ($headers === []) {
             throw new RuntimeException('Website chưa có API key nên không thể chạy thao tác quản trị từ xa.');
         }
 
         $response = Http::acceptJson()
             ->timeout($timeout)
-            ->withHeaders($this->headers($website))
+            ->withHeaders($headers)
             ->post($endpoint);
 
         $payload = $response->json();
@@ -527,5 +531,18 @@ class DrupalUsageClient
             : rtrim($usageEndpoint, '/');
 
         return rtrim($base, '/').'/'.ltrim($suffix, '/');
+    }
+
+    private function effectiveApiKey(MonitoredWebsite $website): ?string
+    {
+        $siteKey = trim((string) $website->api_key);
+        if ($siteKey !== '') {
+            return $siteKey;
+        }
+
+        $setup = $this->setupConfiguration->current();
+        $defaultKey = trim((string) $setup->default_api_key);
+
+        return $defaultKey !== '' ? $defaultKey : null;
     }
 }
