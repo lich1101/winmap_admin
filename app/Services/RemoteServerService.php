@@ -14,8 +14,35 @@ class RemoteServerService
     {
         $payload = $this->runPhpScript($setup, <<<'PHP'
 <?php
-$projectPath = rtrim((string) ($argv[1] ?? ''), DIRECTORY_SEPARATOR);
+$inputPath = rtrim((string) ($argv[1] ?? ''), DIRECTORY_SEPARATOR);
 $scheme = trim((string) ($argv[2] ?? 'https')) ?: 'https';
+
+function normalize_project_path($path) {
+    $path = rtrim((string) $path, DIRECTORY_SEPARATOR);
+    if ($path === '') {
+        return '';
+    }
+
+    if (is_file($path) && basename($path) === 'settings.php') {
+        $path = dirname($path);
+    }
+
+    if (is_dir($path.DIRECTORY_SEPARATOR.'sites')) {
+        return $path;
+    }
+
+    if (basename($path) === 'sites' && is_dir($path)) {
+        return dirname($path);
+    }
+
+    if (is_dir($path) && is_file($path.DIRECTORY_SEPARATOR.'settings.php') && basename(dirname($path)) === 'sites') {
+        return dirname(dirname($path));
+    }
+
+    return $path;
+}
+
+$projectPath = normalize_project_path($inputPath);
 
 if ($projectPath === '' || ! is_dir($projectPath)) {
     fwrite(STDERR, "Drupal project path does not exist.\n");

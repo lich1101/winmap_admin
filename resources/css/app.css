@@ -142,7 +142,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--blue); box-shado
 .primary-button.full { width: 100%; }
 .ghost-button:hover { border-color: var(--blue); color: var(--blue); }
 
-.metrics-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+.metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 16px; }
 .metric-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 22px; display: flex; gap: 16px; box-shadow: none; }
 .metric-card span { display: block; color: var(--muted); font-weight: 800; }
 .metric-card strong { display: block; font-size: 28px; margin: 4px 0; letter-spacing: -.03em; }

@@ -86,12 +86,17 @@ class DrupalSiteDiscoveryService
 
     private function discoverRoot(string $root): array
     {
-        $sitesRoot = rtrim($root, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'sites';
+        $projectRoot = $this->normalizeProjectRoot($root);
+        if ($projectRoot === '') {
+            return [];
+        }
+
+        $sitesRoot = rtrim($projectRoot, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'sites';
         if (! is_dir($sitesRoot)) {
             return [];
         }
 
-        $aliases = $this->siteAliases($root);
+        $aliases = $this->siteAliases($projectRoot);
         $discovered = [];
 
         foreach (glob($sitesRoot.DIRECTORY_SEPARATOR.'*', GLOB_ONLYDIR) ?: [] as $directory) {
@@ -121,7 +126,7 @@ class DrupalSiteDiscoveryService
                 'hosts' => $hosts,
                 'usage_endpoint_url' => sprintf('%s://%s/application/site-usage/json', $scheme, $primaryHost),
                 'config_endpoint_url' => sprintf('%s://%s/application/site-usage/quota/config', $scheme, $primaryHost),
-                'discovery_root' => $root,
+                'discovery_root' => $projectRoot,
                 'discovery_conf_path' => 'sites/'.$name,
             ];
         }
@@ -129,6 +134,32 @@ class DrupalSiteDiscoveryService
         usort($discovered, static fn (array $a, array $b): int => strcasecmp($a['domain'], $b['domain']));
 
         return $discovered;
+    }
+
+    private function normalizeProjectRoot(string $path): string
+    {
+        $path = rtrim($path, DIRECTORY_SEPARATOR);
+        if ($path === '') {
+            return '';
+        }
+
+        if (is_file($path) && basename($path) === 'settings.php') {
+            $path = dirname($path);
+        }
+
+        if (is_dir($path.DIRECTORY_SEPARATOR.'sites')) {
+            return $path;
+        }
+
+        if (basename($path) === 'sites' && is_dir($path)) {
+            return dirname($path);
+        }
+
+        if (is_dir($path) && is_file($path.DIRECTORY_SEPARATOR.'settings.php') && basename(dirname($path)) === 'sites') {
+            return dirname(dirname($path));
+        }
+
+        return $path;
     }
 
     private function siteAliases(string $root): array

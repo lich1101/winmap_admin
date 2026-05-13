@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\MonitoredWebsite;
 use App\Models\UsageSnapshot;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -30,22 +31,33 @@ class DrupalUsageClient
                 throw new \RuntimeException('Usage endpoint returned HTTP '.$response->status());
             }
 
-            $payload = $response->json();
-            if (! is_array($payload)) {
-                throw new \RuntimeException('Usage endpoint did not return valid JSON.');
-            }
+            $payload = $this->decodeJsonResponse($response, 'Usage endpoint');
 
             $sitePayload = $this->pickSitePayload($payload, $website);
-            $totals = Arr::get($sitePayload, 'totals', []);
             $quota = Arr::get($sitePayload, 'quota', []);
-            $diskBytes = (int) Arr::get($totals, 'disk_bytes', 0);
-            $diskAllocatedBytes = Arr::get($totals, 'disk_allocated_bytes');
-            $databaseBytes = (int) Arr::get($totals, 'database_bytes', 0);
-            $projectBytes = (int) Arr::get($totals, 'project_bytes', $diskBytes + $databaseBytes);
+            $diskBytes = (int) $this->firstValue($sitePayload, [
+                'totals.disk_bytes',
+                'disk.total.bytes',
+            ], 0);
+            $diskAllocatedBytes = $this->nullableIntegerValue($this->firstValue($sitePayload, [
+                'totals.disk_allocated_bytes',
+                'disk.total.allocated_bytes',
+            ]));
+            $databaseBytes = (int) $this->firstValue($sitePayload, [
+                'totals.database_bytes',
+                'database.total_bytes',
+            ], 0);
+            $projectBytes = (int) $this->firstValue($sitePayload, [
+                'totals.project_bytes',
+                'quota.project_bytes',
+            ], $diskBytes + $databaseBytes);
             $usagePercent = $website->quota_bytes > 0 ? round(($projectBytes / $website->quota_bytes) * 100, 2) : 0;
             $isBlocked = (bool) Arr::get($quota, 'is_blocked', false);
             $isWarning = (bool) Arr::get($quota, 'is_warning', false);
-            $userCount = (int) Arr::get($quota, 'user_count', Arr::get($sitePayload, 'package.user_count', 0));
+            $userCount = (int) $this->firstValue($sitePayload, [
+                'quota.user_count',
+                'package.user_count',
+            ], 0);
             $status = $isBlocked ? 'blocked' : ($isWarning ? 'warning' : 'ok');
 
             $website->forceFill([
@@ -119,10 +131,7 @@ class DrupalUsageClient
                 throw new RuntimeException('Quota config endpoint returned HTTP '.$response->status());
             }
 
-            $payload = $response->json();
-            if (! is_array($payload)) {
-                throw new RuntimeException('Quota config endpoint did not return valid JSON.');
-            }
+            $payload = $this->decodeJsonResponse($response, 'Quota config endpoint');
 
             $packageSync = $this->syncPackageConfig($website);
             $quota = Arr::get($payload, 'quota', []);
@@ -178,6 +187,87 @@ class DrupalUsageClient
         return $payload;
     }
 
+    private function decodeJsonResponse(Response $response, string $label): array
+    {
+        $payload = $response->json();
+        if (is_array($payload)) {
+            return $payload;
+        }
+
+        $payload = $this->decodeJsonString((string) $response->body());
+        if (is_array($payload)) {
+            return $payload;
+        }
+
+        $body = trim(preg_replace('/\s+/', ' ', strip_tags((string) $response->body())) ?? '');
+        $snippet = $body !== '' ? substr($body, 0, 500) : 'Endpoint did not return valid JSON.';
+
+        throw new RuntimeException($label.' did not return valid JSON: '.$snippet);
+    }
+
+    private function decodeJsonString(string $body): ?array
+    {
+        $normalized = ltrim($body, "\xEF\xBB\xBF\x00\x1A \t\r\n");
+        $decoded = json_decode($normalized, true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        $candidate = $this->extractJsonCandidate($normalized);
+        if ($candidate === null) {
+            return null;
+        }
+
+        $decoded = json_decode($candidate, true);
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    private function extractJsonCandidate(string $body): ?string
+    {
+        $starts = array_filter([
+            strpos($body, '{'),
+            strpos($body, '['),
+        ], static fn ($value) => $value !== false);
+        if ($starts === []) {
+            return null;
+        }
+
+        $ends = array_filter([
+            strrpos($body, '}'),
+            strrpos($body, ']'),
+        ], static fn ($value) => $value !== false);
+        if ($ends === []) {
+            return null;
+        }
+
+        $start = min($starts);
+        $end = max($ends);
+
+        if ($end < $start) {
+            return null;
+        }
+
+        return substr($body, $start, $end - $start + 1);
+    }
+
+    private function firstValue(array $payload, array $paths, mixed $default = null): mixed
+    {
+        foreach ($paths as $path) {
+            $value = Arr::get($payload, $path);
+            if ($value !== null) {
+                return $value;
+            }
+        }
+
+        return $default;
+    }
+
+    private function nullableIntegerValue(mixed $value): ?int
+    {
+        return $value === null ? null : (int) $value;
+    }
+
     private function headers(MonitoredWebsite $website): array
     {
         return $website->api_key
@@ -214,10 +304,8 @@ class DrupalUsageClient
                 'storage_quota_gb' => $storageGb,
             ]);
 
-        $payload = $response->json();
-        if (! is_array($payload)) {
-            $payload = ['message' => trim(strip_tags($response->body())) ?: 'Package config endpoint did not return JSON.'];
-        }
+        $payload = $this->decodeJsonString((string) $response->body())
+            ?? ['message' => trim(strip_tags($response->body())) ?: 'Package config endpoint did not return JSON.'];
 
         if (! $response->successful()) {
             throw new RuntimeException('Package config endpoint returned HTTP '.$response->status().': '.Arr::get($payload, 'message', 'Unknown error'));
@@ -243,10 +331,8 @@ class DrupalUsageClient
                 'password' => $password,
             ]);
 
-        $payload = $response->json();
-        if (! is_array($payload)) {
-            $payload = ['message' => trim(strip_tags($response->body())) ?: 'Token endpoint did not return JSON.'];
-        }
+        $payload = $this->decodeJsonString((string) $response->body())
+            ?? ['message' => trim(strip_tags($response->body())) ?: 'Token endpoint did not return JSON.'];
 
         if (! $response->successful()) {
             throw new RuntimeException('Token endpoint returned HTTP '.$response->status().': '.Arr::get($payload, 'message', 'Unknown error'));

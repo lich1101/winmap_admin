@@ -41,6 +41,9 @@ class SetupController extends Controller
 
         try {
             $sites = $remoteServer->discoverSites($setup);
+            if (! empty($sites[0]['discovery_root'])) {
+                $setup->drupal_project_path = (string) $sites[0]['discovery_root'];
+            }
             $server = $remoteServer->serverSummary($setup);
         } catch (Throwable $exception) {
             throw ValidationException::withMessages([

@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   Terminal,
   Trash2,
+  Users,
 } from 'lucide-react';
 import '../css/app.css';
 
@@ -355,6 +356,16 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
     try {
       const payload = await api('/api/setup/discover', { method: 'POST', body: serverForm });
       const discoveredSites = (payload.sites || []).map(normalizeSite);
+      if (payload.config) {
+        setServerForm((current) => ({
+          ...current,
+          server_host: payload.config.server_host || current.server_host,
+          server_port: payload.config.server_port || current.server_port,
+          server_username: payload.config.server_username || current.server_username,
+          drupal_project_path: payload.config.drupal_project_path || current.drupal_project_path,
+          drupal_site_scheme: payload.config.drupal_site_scheme || current.drupal_site_scheme,
+        }));
+      }
       if (discoveredSites.length === 0) {
         setServerPreview(payload.server || null);
         setSites([]);
@@ -858,7 +869,8 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
             <MetricCard icon={<Server />} label="Server used" value={server?.used_human || '0 B'} sub={`${server?.used_percent || 0}% của ${server?.total_human || '0 B'}`} tone="blue" percent={server?.used_percent || 0} />
             <MetricCard icon={<HardDrive />} label="Server free" value={server?.free_human || '0 B'} sub={`${server?.remote_host || ''} · ${server?.path || '/'}`} tone="green" />
             <MetricCard icon={<Globe2 />} label="Website" value={summary?.website_count || 0} sub={`${summary?.warning_count || 0} sắp đầy · ${summary?.over_quota_count || 0} đã khóa`} tone="amber" />
-            <MetricCard icon={<Database />} label="Tổng project" value={summary?.total_project_human || '0 B'} sub="Disk + database đã check gần nhất" tone="slate" />
+            <MetricCard icon={<Users />} label="Tài khoản hiện tại" value={summary?.total_user_count || 0} sub="Tổng user hệ thống đã ghi nhận gần nhất" tone="slate" />
+            <MetricCard icon={<Database />} label="Tổng project" value={summary?.total_project_human || '0 B'} sub={`Disk ${summary?.total_disk_human || '0 B'} · DB ${summary?.total_database_human || '0 B'}`} tone="slate" />
           </section>
 
           <section className="content-grid">
@@ -1047,9 +1059,9 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
                 </td>
                 <td>
                   <strong>{site.last_project_human}</strong>
-                  <small>Disk {site.last_disk_human} · DB {site.last_database_human}</small>
+                  <small>Dung lượng hiện tại: Disk {site.last_disk_human} · DB {site.last_database_human}</small>
                   <UsageBar percent={site.last_usage_percent || 0} />
-                  <small>User {site.last_user_count || 0}{site.user_limit > 0 ? ` / ${site.user_limit}` : ' / không giới hạn'}</small>
+                  <small>Tài khoản hiện tại: {site.last_user_count || 0}{site.user_limit > 0 ? ` / ${site.user_limit}` : ' / không giới hạn'}</small>
                 </td>
                 <td>
                   <strong>{site.quota_human}</strong>

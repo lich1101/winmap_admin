@@ -44,6 +44,24 @@ class WebsiteQuotaControlTest extends TestCase
         $this->assertSame('https://enter.winmap.vn/application/site-usage/quota/config', $byDomain['enter.winmap.vn']['config_endpoint_url']);
     }
 
+    public function test_admin_can_discover_multisite_when_configured_path_points_to_a_site_directory(): void
+    {
+        $root = storage_path('framework/testing/drupal-discovery-site-path');
+        File::deleteDirectory($root);
+        File::ensureDirectoryExists($root.'/sites/enter.winmap.vn');
+
+        File::put($root.'/sites/enter.winmap.vn/settings.php', "<?php\n\$databases = array();\n\$conf = array();\n");
+
+        Config::set('winmap_admin.discovery.roots', [$root.'/sites/enter.winmap.vn']);
+
+        $sites = app(DrupalSiteDiscoveryService::class)->discover();
+
+        $this->assertCount(1, $sites);
+        $this->assertSame('enter.winmap.vn', $sites[0]['domain']);
+        $this->assertSame($root, $sites[0]['discovery_root']);
+        $this->assertSame('sites/enter.winmap.vn', $sites[0]['discovery_conf_path']);
+    }
+
     public function test_admin_store_syncs_quota_to_drupal_site(): void
     {
         Http::fake([
@@ -161,6 +179,82 @@ class WebsiteQuotaControlTest extends TestCase
 
         $this->assertSame(150, MonitoredWebsite::query()->where('domain', 'enter.winmap.vn')->value('last_project_bytes'));
         $this->assertSame(275, MonitoredWebsite::query()->where('domain', 'demo.winmap.vn')->value('last_project_bytes'));
+    }
+
+    public function test_admin_can_refresh_usage_from_detailed_site_usage_report_payload(): void
+    {
+        SetupConfiguration::query()->create([
+            'is_completed' => true,
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'enter.winmap.vn',
+        ]);
+
+        MonitoredWebsite::query()->create([
+            'name' => 'Enter',
+            'domain' => 'enter.winmap.vn',
+            'usage_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/json',
+            'config_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/quota/config',
+            'enabled' => true,
+            'quota_bytes' => 1024 * 1024 * 1024,
+            'warning_threshold_percent' => 85,
+            'user_limit' => 10,
+        ]);
+
+        $body = "\xEF\xBB\xBF".json_encode([
+            'status' => 'success',
+            'generated_at' => '2026-05-13T08:17:29+07:00',
+            'site' => [
+                'host' => 'enter.winmap.vn',
+                'conf_path' => 'sites/enter.winmap.vn',
+            ],
+            'disk' => [
+                'total' => [
+                    'bytes' => 180,
+                    'allocated_bytes' => 200,
+                ],
+            ],
+            'database' => [
+                'total_bytes' => 70,
+            ],
+            'quota' => [
+                'is_blocked' => false,
+                'is_warning' => true,
+                'user_count' => 7,
+            ],
+            'package' => [
+                'user_count' => 7,
+            ],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        Http::fake([
+            'https://enter.winmap.vn/application/site-usage/json' => Http::response($body, 200, [
+                'Content-Type' => 'application/json; charset=utf-8',
+            ]),
+        ]);
+
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/websites/refresh-all');
+
+        $response->assertOk()
+            ->assertJsonPath('summary.count', 1)
+            ->assertJsonPath('summary.success', 1)
+            ->assertJsonPath('summary.errors', 0);
+
+        $website = MonitoredWebsite::query()->where('domain', 'enter.winmap.vn')->firstOrFail();
+        $this->assertSame(180, $website->last_disk_bytes);
+        $this->assertSame(70, $website->last_database_bytes);
+        $this->assertSame(250, $website->last_project_bytes);
+        $this->assertSame(7, $website->last_user_count);
+        $this->assertSame('warning', $website->last_status);
     }
 
     public function test_admin_can_login_with_account_name_like_web_login(): void
