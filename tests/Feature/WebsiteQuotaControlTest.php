@@ -62,7 +62,7 @@ class WebsiteQuotaControlTest extends TestCase
         $this->assertSame('sites/enter.winmap.vn', $sites[0]['discovery_conf_path']);
     }
 
-    public function test_admin_store_syncs_quota_to_drupal_site(): void
+    public function test_admin_store_saves_website_without_immediate_sync_by_default(): void
     {
         Http::fake([
             'https://enter.winmap.vn/application/site-usage/quota/config' => Http::response([
@@ -102,9 +102,9 @@ class WebsiteQuotaControlTest extends TestCase
             ->assertJsonPath('data.name', 'enter.winmap.vn')
             ->assertJsonPath('data.usage_endpoint_url', 'https://enter.winmap.vn/application/site-usage/json')
             ->assertJsonPath('data.config_endpoint_url', 'https://enter.winmap.vn/application/site-usage/quota/config')
-            ->assertJsonPath('data.last_sync_status', 'ok');
+            ->assertJsonPath('data.last_sync_status', 'pending');
 
-        Http::assertSentCount(1);
+        Http::assertSentCount(0);
     }
 
     public function test_admin_store_syncs_quota_to_drupal_site_with_setup_default_api_key(): void
@@ -144,6 +144,7 @@ class WebsiteQuotaControlTest extends TestCase
             'quota_gb' => 10,
             'warning_threshold_percent' => 90,
             'enabled' => true,
+            'sync_now' => true,
         ]);
 
         $response->assertCreated()

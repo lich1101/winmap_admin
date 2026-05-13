@@ -28,7 +28,14 @@ class MonitoredWebsiteController extends Controller
         $data = $this->validated($request);
         $website = MonitoredWebsite::create($data);
 
-        return $this->syncAfterSave($website, app(DrupalUsageClient::class), 201);
+        if ($request->boolean('sync_now')) {
+            return $this->syncAfterSave($website, app(DrupalUsageClient::class), 201);
+        }
+
+        return response()->json([
+            'message' => 'Đã lưu website vào admin. Quota sẽ được đồng bộ khi website sẵn sàng hoặc khi bật đồng bộ ngay.',
+            'data' => $this->decorate($website->refresh()),
+        ], 201);
     }
 
     public function show(MonitoredWebsite $website): JsonResponse

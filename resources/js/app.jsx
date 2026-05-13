@@ -1436,6 +1436,7 @@ function WebsiteDrawer({ website, setup, onClose, onSaved }) {
     user_limit: website.user_limit || 0,
     warning_threshold_percent: website.warning_threshold_percent || 85,
     enabled: website.enabled ?? true,
+    sync_now: false,
     notes: website.notes || '',
   });
   const [error, setError] = useState('');
@@ -1525,10 +1526,18 @@ function WebsiteDrawer({ website, setup, onClose, onSaved }) {
             <label>Ngưỡng cảnh báo %<input value={form.warning_threshold_percent} onChange={(event) => update('warning_threshold_percent', event.target.value)} type="number" min="1" max="100" step="1" required /></label>
           </div>
           <div className="info-strip">
-            {setup?.has_default_api_key
-              ? 'Nếu website dùng chung key hệ thống thì có thể bỏ trống API key riêng. Khi lưu, admin sẽ dùng key mặc định để đồng bộ quota xuống quota endpoint, gọi /api/admin/package-config và chạy bảo trì từ xa.'
-              : 'Khi lưu, admin sẽ đồng bộ dung lượng/user limit xuống `/application/site-usage/quota/config` và `/api/admin/package-config` của website.'}
+            {isEdit
+              ? (setup?.has_default_api_key
+                ? 'Nếu website dùng chung key hệ thống thì có thể bỏ trống API key riêng. Khi lưu, admin sẽ dùng key mặc định để đồng bộ quota xuống quota endpoint, gọi /api/admin/package-config và chạy bảo trì từ xa.'
+                : 'Khi lưu, admin sẽ đồng bộ dung lượng/user limit xuống `/application/site-usage/quota/config` và `/api/admin/package-config` của website.')
+              : 'Với website mới, hãy ưu tiên dùng `Khởi tạo website` để chạy đủ các bước tạo subdomain, cấp SSL, copy code và clone DB. Form này mặc định chỉ lưu website vào admin; chỉ bật đồng bộ ngay nếu site đã có SSL và endpoint sẵn sàng.'}
           </div>
+          {!isEdit && (
+            <label className="check-line">
+              <input type="checkbox" checked={form.sync_now} onChange={(event) => update('sync_now', event.target.checked)} />
+              Đồng bộ quota ngay sau khi lưu
+            </label>
+          )}
           <label>Ghi chú<textarea value={form.notes} onChange={(event) => update('notes', event.target.value)} rows="4" /></label>
           <label className="check-line"><input type="checkbox" checked={form.enabled} onChange={(event) => update('enabled', event.target.checked)} />Đang theo dõi</label>
           {error && <div className="error-box">{error}</div>}

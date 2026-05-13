@@ -43,6 +43,7 @@ https://<domain>/application/site-usage/quota/config
 ```
 
 Leave the per-website API key and website credential fields empty when the site should use the defaults saved in setup.
+Manual website creation saves the record first and does not call the quota config endpoint unless `sync_now` is explicitly requested. Use this for sites that already exist but may not have SSL/endpoints ready yet; use the provisioning flow for brand-new subdomains.
 
 When a site exceeds quota, the Drupal module blocks normal HTML pages and normal APIs. Only the quota/usage management endpoints remain open so this admin panel can still unlock the site by raising quota.
 
@@ -278,10 +279,10 @@ Do not add dangerous commands such as `rm`, `sh`, `bash`, `php`, `python`, or pa
 
 ## Development log
 
-### 2026-05-13 Simplify Manual Website Creation
+### 2026-05-13 Align Manual Website Creation With Provisioning
 
-- **Done:** Manual website creation now derives name, usage endpoint, and quota config endpoint from the domain when fields are left empty.
+- **Done:** Manual website creation now derives name, usage endpoint, and quota config endpoint from the domain when fields are left empty, and skips immediate quota sync by default.
 - **Why:** Operators should only need to enter the domain for standard Winmap Drupal multisite endpoints.
-- **Issues:** The previous form showed endpoint placeholders but still required manual usage endpoint input.
-- **Fixes:** Added frontend auto-fill plus backend derivation so direct API calls also work.
-- **Next steps:** Verify in the browser that custom endpoints are preserved when editing existing websites.
+- **Issues:** The previous form showed endpoint placeholders but still required manual usage endpoint input, then tried to sync quota before newly provisioned sites had SSL.
+- **Fixes:** Added frontend auto-fill plus backend derivation so direct API calls also work; added opt-in immediate sync for already-ready sites.
+- **Next steps:** Use `Khởi tạo website` for new subdomains so SSL, folders, settings, and database are completed before monitoring.
