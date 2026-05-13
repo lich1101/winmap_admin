@@ -86,50 +86,32 @@ function websiteHomeUrl(site) {
   return domain ? `https://${domain}` : '#';
 }
 
-function websiteHasCredentialFallback(site, setup) {
-  if (site?.uses_default_credentials) {
-    return Boolean(setup?.default_website_username && setup?.has_default_website_password);
-  }
-
-  return Boolean(site?.website_username && site?.has_website_password);
-}
-
 function websiteHasEffectiveApiKey(site, setup) {
   return Boolean(site?.has_api_key || setup?.has_default_api_key);
 }
 
-function websiteUsesSharedApiKey(site, setup) {
-  return Boolean(!site?.has_api_key && setup?.has_default_api_key);
-}
-
 function websiteCredentialSummary(site, setup) {
-  if (site?.uses_default_credentials) {
-    return setup?.default_website_username
-      ? `Mặc định (${setup.default_website_username})`
-      : 'Mặc định hệ thống';
-  }
-
-  return site?.website_username || 'Credential riêng';
+  return site?.uses_default_credentials ? 'Mặc định' : (site?.website_username || 'Riêng');
 }
 
 function websitePasswordSummary(site, setup) {
   if (site?.uses_default_credentials) {
-    return setup?.has_default_website_password ? 'Đã lưu mật khẩu mặc định' : 'Chưa có mật khẩu mặc định';
+    return setup?.has_default_website_password ? 'Đã lưu' : 'Thiếu';
   }
 
-  return site?.has_website_password ? 'Đã lưu mật khẩu riêng' : 'Chưa có mật khẩu riêng';
+  return site?.has_website_password ? 'Đã lưu' : 'Thiếu';
 }
 
 function websiteApiKeySummary(site, setup) {
   if (site?.has_api_key) {
-    return 'Key riêng đã lưu';
+    return 'Riêng';
   }
 
   if (setup?.has_default_api_key) {
-    return 'Đang dùng key mặc định hệ thống';
+    return 'Mặc định';
   }
 
-  return 'Chưa có API key';
+  return 'Thiếu';
 }
 
 function websiteStorageLimitLabel(site) {
@@ -140,16 +122,39 @@ function websiteUserLimitLabel(site) {
   return site?.user_limit > 0 ? String(site.user_limit) : 'Không giới hạn';
 }
 
-function websiteStorageRatio(site) {
-  return `${site?.last_project_human || '0 B'} / ${websiteStorageLimitLabel(site)}`;
-}
-
-function websiteUserRatio(site) {
-  return `${site?.last_user_count || 0} / ${websiteUserLimitLabel(site)}`;
-}
-
 function formatDateTime(value) {
   return value ? new Date(value).toLocaleString('vi-VN') : '';
+}
+
+function formatCompactDateTime(value) {
+  if (!value) {
+    return '';
+  }
+
+  return new Date(value).toLocaleString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+  });
+}
+
+function InfiniteMark() {
+  return <span className="infinity-mark" aria-label="Không giới hạn" title="Không giới hạn">∞</span>;
+}
+
+function LimitValue({ value }) {
+  return value ? value : <InfiniteMark />;
+}
+
+function HoverDetail({ primary, secondary, tooltip, align = 'left', titleText = '' }) {
+  return (
+    <div className="hover-detail" title={titleText}>
+      <div className="hover-detail-primary">{primary}</div>
+      {secondary ? <small className="hover-detail-secondary">{secondary}</small> : null}
+      {tooltip ? <div className={`cell-tooltip ${align === 'right' ? 'align-right' : ''}`}>{tooltip}</div> : null}
+    </div>
+  );
 }
 
 const maintenanceOperations = {
@@ -731,6 +736,7 @@ function normalizeSite(site) {
 
 function Dashboard({ user, setup, onLogout, onOpenSetup }) {
   const [dashboard, setDashboard] = useState(null);
+  const [activeTab, setActiveTab] = useState('websites');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -739,6 +745,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
   const [refreshingId, setRefreshingId] = useState(null);
   const [discovering, setDiscovering] = useState(false);
   const [bulkRefreshing, setBulkRefreshing] = useState(false);
+  const [websiteOperationKey, setWebsiteOperationKey] = useState('');
   const [maintenanceBatch, setMaintenanceBatch] = useState({
     running: false,
     operation: '',
@@ -805,6 +812,32 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
       setError(err.message);
     } finally {
       setBulkRefreshing(false);
+    }
+  }
+
+  async function runWebsiteOperation(site, operation) {
+    const config = maintenanceOperations[operation];
+    if (!config) {
+      return;
+    }
+    if (!websiteHasEffectiveApiKey(site, setup)) {
+      setError(`Website ${site.domain} chưa có API key hiệu lực để chạy thao tác này.`);
+      return;
+    }
+
+    const key = `${site.id}:${operation}`;
+    setWebsiteOperationKey(key);
+    setError('');
+    setNotice('');
+
+    try {
+      const payload = await api(`/api/websites/${site.id}/${config.route}`, { method: 'POST' });
+      setNotice(`${config.doneLabel} cho ${site.domain}: ${payload.remote?.message || 'thành công'}.`);
+      await loadDashboard();
+    } catch (err) {
+      setError(`${site.domain}: ${err.message}`);
+    } finally {
+      setWebsiteOperationKey('');
     }
   }
 
@@ -941,31 +974,58 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
             <MetricCard icon={<Database />} label="Tổng project" value={summary?.total_project_human || '0 B'} sub={`Disk ${summary?.total_disk_human || '0 B'} · DB ${summary?.total_database_human || '0 B'}`} tone="slate" />
           </section>
 
-          <section className="content-grid">
-            <WebsitePanel
-              setup={setup}
-              websites={websites}
-              refreshingId={refreshingId}
-              discovering={discovering}
-              bulkRefreshing={bulkRefreshing}
-              onRefresh={refreshWebsite}
-              onRefreshAll={refreshAllWebsites}
-              onEdit={setEditing}
-              onDelete={deleteWebsite}
-              onCreate={() => setEditing({})}
-              onProvision={() => setProvisioningOpen(true)}
-              onDiscoverySync={syncDiscoveredWebsites}
-            />
-            <div className="side-stack">
+          <section className="dashboard-tabs">
+            <button className={`dashboard-tab ${activeTab === 'websites' ? 'active' : ''}`} onClick={() => setActiveTab('websites')}>
+              <Globe2 size={16} />
+              Website
+            </button>
+            <button className={`dashboard-tab ${activeTab === 'maintenance' ? 'active' : ''}`} onClick={() => setActiveTab('maintenance')}>
+              <Activity size={16} />
+              Bảo trì hàng loạt
+            </button>
+            <button className={`dashboard-tab ${activeTab === 'terminal' ? 'active' : ''}`} onClick={() => setActiveTab('terminal')}>
+              <Terminal size={16} />
+              Terminal
+            </button>
+          </section>
+
+          {activeTab === 'websites' && (
+            <section className="dashboard-tab-panel">
+              <WebsitePanel
+                setup={setup}
+                websites={websites}
+                refreshingId={refreshingId}
+                discovering={discovering}
+                bulkRefreshing={bulkRefreshing}
+                websiteOperationKey={websiteOperationKey}
+                onRefresh={refreshWebsite}
+                onRefreshAll={refreshAllWebsites}
+                onRunOperation={runWebsiteOperation}
+                onEdit={setEditing}
+                onDelete={deleteWebsite}
+                onCreate={() => setEditing({})}
+                onProvision={() => setProvisioningOpen(true)}
+                onDiscoverySync={syncDiscoveredWebsites}
+              />
+            </section>
+          )}
+
+          {activeTab === 'maintenance' && (
+            <section className="dashboard-tab-panel single-panel">
               <MaintenanceBatchPanel
                 setup={setup}
                 websites={websites}
                 batch={maintenanceBatch}
                 onRun={runMaintenanceBatch}
               />
+            </section>
+          )}
+
+          {activeTab === 'terminal' && (
+            <section className="dashboard-tab-panel single-panel">
               <TerminalPanel onError={setError} projectPath={setup.drupal_project_path} />
-            </div>
-          </section>
+            </section>
+          )}
         </>
       )}
 
@@ -1074,7 +1134,7 @@ function MetricCard({ icon, label, value, sub, tone, percent }) {
   );
 }
 
-function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshing, onRefresh, onRefreshAll, onEdit, onDelete, onCreate, onProvision, onDiscoverySync }) {
+function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshing, websiteOperationKey, onRefresh, onRefreshAll, onRunOperation, onEdit, onDelete, onCreate, onProvision, onDiscoverySync }) {
   return (
     <section className="panel website-panel">
       <div className="panel-header">
@@ -1096,111 +1156,195 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
         </div>
       </div>
 
-      <div className="website-list">
-        <div className="website-list-head">
-          <span>Website</span>
-          <span>Sử dụng</span>
-          <span>Trạng thái</span>
-          <span className="website-list-head-actions">Thao tác</span>
-        </div>
+      <div className="website-table-wrap">
+        <table className="website-table">
+          <thead>
+            <tr>
+              <th className="sticky-col">Website</th>
+              <th>Credential</th>
+              <th>Mật khẩu</th>
+              <th>API key</th>
+              <th>Dung lượng</th>
+              <th>Người dùng</th>
+              <th>Trạng thái</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            {websites.length === 0 && (
+              <tr>
+                <td colSpan="8" className="empty-cell website-empty">Chưa có website nào. Chạy setup hoặc quét multisite để bắt đầu.</td>
+              </tr>
+            )}
 
-        {websites.length === 0 && (
-          <div className="empty-cell website-empty">Chưa có website nào. Chạy setup hoặc quét multisite để bắt đầu.</div>
-        )}
+            {websites.map((site) => {
+              const statusMessage = site.last_error
+                ? `Usage lỗi: ${site.last_error}`
+                : (site.last_sync_status === 'error' ? `Sync quota lỗi: ${site.last_sync_error}` : '');
+              const lastChecked = formatDateTime(site.last_checked_at);
+              const lastSynced = formatDateTime(site.last_synced_at);
+              const lastCheckedShort = formatCompactDateTime(site.last_checked_at);
+              const hasLimit = site.quota_bytes > 0;
+              const hasUserLimit = site.user_limit > 0;
 
-        {websites.map((site) => {
-          const statusMessage = site.last_error
-            ? `Usage lỗi: ${site.last_error}`
-            : (site.last_sync_status === 'error' ? `Sync quota lỗi: ${site.last_sync_error}` : '');
-          const lastChecked = formatDateTime(site.last_checked_at);
-          const lastSynced = formatDateTime(site.last_synced_at);
+              return (
+                <tr
+                  key={site.id}
+                  className={site.last_is_blocked ? 'danger-row' : (site.last_is_warning ? 'warn-row' : '')}
+                >
+                  <td className="sticky-col website-sticky-cell">
+                    <div className="website-name-block">
+                      <strong>
+                        <a className="website-link" href={websiteHomeUrl(site)} target="_blank" rel="noreferrer noopener">
+                          {site.name}
+                        </a>
+                      </strong>
+                      <small>{site.domain}</small>
+                    </div>
+                  </td>
 
-          return (
-            <article
-              key={site.id}
-              className={`website-row ${site.last_is_blocked ? 'danger-row' : (site.last_is_warning ? 'warn-row' : '')}`}
-            >
-              <div className="website-cell website-cell-main">
-                <div className="website-name-block">
-                  <strong>
-                    <a className="website-link" href={websiteHomeUrl(site)} target="_blank" rel="noreferrer noopener">
-                      {site.name}
-                    </a>
-                  </strong>
-                  <small>{site.domain}</small>
-                </div>
-
-                <div className="website-meta-inline">
-                  <span className="website-meta-chip"><strong>Credential</strong>{websiteCredentialSummary(site, setup)}</span>
-                  <span className="website-meta-chip"><strong>Mật khẩu</strong>{websitePasswordSummary(site, setup)}</span>
-                  <span className="website-meta-chip"><strong>API key</strong>{websiteApiKeySummary(site, setup)}</span>
-                </div>
-
-                {websiteHasEffectiveApiKey(site, setup) ? null : (
-                  <small className="muted-alert website-inline-note">
-                    {websiteHasCredentialFallback(site, setup)
-                      ? 'Đọc usage sẽ fallback qua credential quản trị nếu endpoint đang khóa key.'
-                      : 'Cần lưu API key hoặc credential quản trị để đọc usage khi endpoint bị khóa.'}
-                  </small>
-                )}
-              </div>
-
-              <div className="website-cell website-cell-usage">
-                <div className="usage-card">
-                  <span className="usage-card-label">Dung lượng</span>
-                  <button type="button" className="usage-detail-trigger">
-                    <strong>{websiteStorageRatio(site)}</strong>
-                    <small>{site.quota_bytes > 0 ? `${site.last_usage_percent || 0}% quota` : 'Không giới hạn quota'}</small>
-                    <div className="usage-tooltip" role="tooltip">
-                      <span className="usage-tooltip-title">Chi tiết dung lượng</span>
-                      <div className="usage-tooltip-grid">
-                        <div>
-                          <span>Tổng</span>
-                          <strong>{site.last_project_human}</strong>
+                  <td>
+                    <HoverDetail
+                      primary={websiteCredentialSummary(site, setup)}
+                      secondary={site.uses_default_credentials ? 'Dùng chung' : 'Tài khoản riêng'}
+                      titleText={site.uses_default_credentials ? `Credential mặc định: ${setup?.default_website_username || 'chưa điền'}` : `Credential riêng: ${site.website_username || 'chưa điền'}`}
+                      tooltip={(
+                        <div className="cell-tooltip-stack">
+                          <div><span>Nguồn</span><strong>{site.uses_default_credentials ? 'Mặc định hệ thống' : 'Website riêng'}</strong></div>
+                          <div><span>Tài khoản</span><strong>{site.uses_default_credentials ? (setup?.default_website_username || 'Chưa điền') : (site.website_username || 'Chưa điền')}</strong></div>
                         </div>
-                        <div>
-                          <span>Quota</span>
-                          <strong>{websiteStorageLimitLabel(site)}</strong>
+                      )}
+                    />
+                  </td>
+
+                  <td>
+                    <HoverDetail
+                      primary={websitePasswordSummary(site, setup)}
+                      secondary={site.uses_default_credentials ? 'Mặc định' : 'Riêng'}
+                      titleText={site.uses_default_credentials ? (setup?.has_default_website_password ? 'Đã lưu mật khẩu mặc định' : 'Chưa có mật khẩu mặc định') : (site?.has_website_password ? 'Đã lưu mật khẩu riêng' : 'Chưa có mật khẩu riêng')}
+                      tooltip={(
+                        <div className="cell-tooltip-stack">
+                          <div><span>Trạng thái</span><strong>{site.uses_default_credentials ? (setup?.has_default_website_password ? 'Đã lưu mật khẩu mặc định' : 'Chưa có mật khẩu mặc định') : (site?.has_website_password ? 'Đã lưu mật khẩu riêng' : 'Chưa có mật khẩu riêng')}</strong></div>
+                          <div><span>Loại</span><strong>{site.uses_default_credentials ? 'Mật khẩu dùng chung cho nhóm website' : 'Mật khẩu riêng cho website này'}</strong></div>
                         </div>
-                        <div>
-                          <span>Disk</span>
-                          <strong>{site.last_disk_human}</strong>
+                      )}
+                    />
+                  </td>
+
+                  <td>
+                    <HoverDetail
+                      primary={websiteApiKeySummary(site, setup)}
+                      secondary={websiteHasEffectiveApiKey(site, setup) ? 'Sẵn sàng' : 'Thiếu key'}
+                      titleText={websiteApiKeySummary(site, setup)}
+                      tooltip={(
+                        <div className="cell-tooltip-stack">
+                          <div><span>Nguồn</span><strong>{site.has_api_key ? 'API key riêng của website' : (setup?.has_default_api_key ? 'API key mặc định của hệ thống' : 'Chưa cấu hình API key')}</strong></div>
+                          <div><span>Khả năng</span><strong>{websiteHasEffectiveApiKey(site, setup) ? 'Dùng được cho quota sync và bảo trì từ xa' : 'Chưa đủ điều kiện quota sync hoặc bảo trì từ xa'}</strong></div>
                         </div>
-                        <div>
-                          <span>Database</span>
-                          <strong>{site.last_database_human}</strong>
+                      )}
+                    />
+                  </td>
+
+                  <td>
+                    <div className="metric-cell">
+                      <HoverDetail
+                        primary={(
+                          <span className="ratio-inline">
+                            <span>{site.last_project_human}</span>
+                            <span className="ratio-separator">/</span>
+                            <LimitValue value={hasLimit ? site.quota_human : ''} />
+                          </span>
+                        )}
+                        secondary={hasLimit ? `${site.last_usage_percent || 0}% quota` : 'Không giới hạn'}
+                        titleText={`Tổng ${site.last_project_human}. Quota ${websiteStorageLimitLabel(site)}. Disk ${site.last_disk_human}. Database ${site.last_database_human}.`}
+                        tooltip={(
+                          <div className="cell-tooltip-grid">
+                            <div><span>Tổng</span><strong>{site.last_project_human}</strong></div>
+                            <div><span>Quota</span><strong>{websiteStorageLimitLabel(site)}</strong></div>
+                            <div><span>Disk</span><strong>{site.last_disk_human}</strong></div>
+                            <div><span>Database</span><strong>{site.last_database_human}</strong></div>
+                            <div><span>Cảnh báo</span><strong>{site.warning_threshold_percent}%</strong></div>
+                            <div><span>Trạng thái</span><strong>{hasLimit ? `${site.last_usage_percent || 0}% quota` : 'Không giới hạn quota'}</strong></div>
+                          </div>
+                        )}
+                      />
+                      {hasLimit ? <UsageBar percent={site.last_usage_percent || 0} /> : null}
+                    </div>
+                  </td>
+
+                  <td>
+                    <HoverDetail
+                      primary={(
+                        <span className="ratio-inline">
+                          <span>{site.last_user_count || 0}</span>
+                          <span className="ratio-separator">/</span>
+                          <LimitValue value={hasUserLimit ? String(site.user_limit) : ''} />
+                        </span>
+                      )}
+                      secondary={hasUserLimit ? `${site.user_usage_percent || 0}% giới hạn` : 'Không giới hạn'}
+                      titleText={`Tài khoản hiện tại ${site.last_user_count || 0}. Giới hạn ${websiteUserLimitLabel(site)}.`}
+                      tooltip={(
+                        <div className="cell-tooltip-grid">
+                          <div><span>Hiện tại</span><strong>{site.last_user_count || 0}</strong></div>
+                          <div><span>Giới hạn</span><strong>{websiteUserLimitLabel(site)}</strong></div>
+                          <div><span>Trạng thái</span><strong>{hasUserLimit ? `${site.user_usage_percent || 0}% giới hạn` : 'Không giới hạn user'}</strong></div>
                         </div>
+                      )}
+                    />
+                  </td>
+
+                  <td>
+                    <HoverDetail
+                      primary={<StatusPill site={site} />}
+                      secondary={lastCheckedShort || 'Chưa kiểm tra'}
+                      align="right"
+                      titleText={statusMessage || lastChecked || 'Chưa có trạng thái'}
+                      tooltip={(
+                        <div className="cell-tooltip-stack">
+                          <div><span>Kiểm tra</span><strong>{lastChecked || 'Chưa lấy số liệu'}</strong></div>
+                          <div><span>Đồng bộ quota</span><strong>{lastSynced || 'Chưa có lần đồng bộ quota gần nhất'}</strong></div>
+                          <div><span>Chi tiết</span><strong>{statusMessage || 'Không có lỗi đồng bộ gần nhất'}</strong></div>
+                        </div>
+                      )}
+                    />
+                  </td>
+
+                  <td className="website-actions-cell">
+                    <div className="website-action-stack">
+                      <div className="website-action-inline">
+                        <button
+                          className="website-action-button"
+                          onClick={() => onRunOperation(site, 'clear-cache')}
+                          disabled={websiteOperationKey !== '' || !websiteHasEffectiveApiKey(site, setup)}
+                          title={websiteHasEffectiveApiKey(site, setup) ? 'Clear cache website này' : 'Website thiếu API key hiệu lực'}
+                        >
+                          {websiteOperationKey === `${site.id}:clear-cache` ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+                          Cache
+                        </button>
+                        <button
+                          className="website-action-button primary"
+                          onClick={() => onRunOperation(site, 'run-update')}
+                          disabled={websiteOperationKey !== '' || !websiteHasEffectiveApiKey(site, setup)}
+                          title={websiteHasEffectiveApiKey(site, setup) ? 'Chạy update.php cho website này' : 'Website thiếu API key hiệu lực'}
+                        >
+                          {websiteOperationKey === `${site.id}:run-update` ? <Loader2 className="spin" size={15} /> : <Play size={15} />}
+                          Update
+                        </button>
+                      </div>
+                      <div className="row-icon-actions">
+                        <button onClick={() => onRefresh(site.id)} title="Refresh">
+                          {refreshingId === site.id ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                        </button>
+                        <button onClick={() => onEdit(site)} title="Sửa"><Save size={16} /></button>
+                        <button onClick={() => onDelete(site.id)} title="Xóa"><Trash2 size={16} /></button>
                       </div>
                     </div>
-                  </button>
-                  <UsageBar percent={site.quota_bytes > 0 ? (site.last_usage_percent || 0) : 0} />
-                  <small>Cảnh báo từ {site.warning_threshold_percent}%</small>
-                </div>
-
-                <div className="usage-card">
-                  <span className="usage-card-label">Người dùng</span>
-                  <strong className="usage-ratio-text">{websiteUserRatio(site)}</strong>
-                  <small>{site.user_limit > 0 ? 'Đang dùng / giới hạn user' : 'Chưa đặt giới hạn user'}</small>
-                </div>
-              </div>
-
-              <div className="website-cell website-cell-status">
-                <StatusPill site={site} />
-                <small>{lastChecked ? `Đã kiểm tra ${lastChecked}` : 'Chưa lấy số liệu'}</small>
-                <small>{lastSynced ? `Đồng bộ quota ${lastSynced}` : 'Chưa có lần đồng bộ quota gần nhất'}</small>
-                {statusMessage ? <small className="muted-alert website-status-note">{statusMessage}</small> : null}
-              </div>
-
-              <div className="website-cell row-actions">
-                <button onClick={() => onRefresh(site.id)} title="Refresh">
-                  {refreshingId === site.id ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-                </button>
-                <button onClick={() => onEdit(site)} title="Sửa"><Save size={16} /></button>
-                <button onClick={() => onDelete(site.id)} title="Xóa"><Trash2 size={16} /></button>
-              </div>
-            </article>
-          );
-        })}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </section>
   );
