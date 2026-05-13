@@ -10,6 +10,10 @@ use RuntimeException;
 class WebsiteProvisionService
 {
     private const MAX_RETRIES = 3;
+    private const SCRIPT_PARENT_DOMAIN = 'winmap.vn';
+    private const SCRIPT_WWW_ROOT = 'httpdocs_inventory';
+    private const SCRIPT_SOURCE_DATABASE = 'inventory';
+    private const SCRIPT_MYSQL_PASSWORD_FILE = '/root/.mysql_pass';
 
     public function __construct(
         private readonly SetupConfigurationService $setupConfiguration,
@@ -32,7 +36,7 @@ class WebsiteProvisionService
         $setup = $this->requiredSetup();
 
         $subdomain = $this->normalizeSubdomain($data['subdomain'] ?? '');
-        $parentDomain = trim((string) ($data['parent_domain'] ?? $this->defaultParentDomain($setup)));
+        $parentDomain = trim((string) ($data['parent_domain'] ?? '')) ?: $this->defaultParentDomain($setup);
         if ($parentDomain === '') {
             throw new RuntimeException('Không suy ra được domain cha. Hãy điền domain cha khi khởi tạo website.');
         }
@@ -49,11 +53,11 @@ class WebsiteProvisionService
         }
 
         $projectPath = rtrim((string) $setup->drupal_project_path, '/');
-        $wwwRoot = trim((string) ($data['www_root'] ?? basename($projectPath)));
-        $systemUser = trim((string) ($data['system_user'] ?? ('ftp_'.$parentDomain)));
-        $sourceDatabase = trim((string) ($data['source_database'] ?? ''));
-        $mysqlPasswordFile = trim((string) ($data['mysql_password_file'] ?? '/root/.mysql_pass'));
-        $sslRegistrationEmail = trim((string) ($data['ssl_registration_email'] ?? ('admin@'.$parentDomain)));
+        $wwwRoot = trim((string) ($data['www_root'] ?? '')) ?: self::SCRIPT_WWW_ROOT;
+        $systemUser = trim((string) ($data['system_user'] ?? '')) ?: 'ftp_'.$parentDomain;
+        $sourceDatabase = trim((string) ($data['source_database'] ?? '')) ?: self::SCRIPT_SOURCE_DATABASE;
+        $mysqlPasswordFile = trim((string) ($data['mysql_password_file'] ?? '')) ?: self::SCRIPT_MYSQL_PASSWORD_FILE;
+        $sslRegistrationEmail = trim((string) ($data['ssl_registration_email'] ?? '')) ?: 'admin@'.$parentDomain;
         $websiteUsername = trim((string) ($data['website_username'] ?? ''));
         $websitePassword = (string) ($data['website_password'] ?? '');
 
@@ -172,10 +176,10 @@ class WebsiteProvisionService
 
         return [
             'parent_domain' => $parentDomain,
-            'www_root' => basename(rtrim((string) $setup->drupal_project_path, '/')),
+            'www_root' => self::SCRIPT_WWW_ROOT,
             'system_user' => $parentDomain !== '' ? 'ftp_'.$parentDomain : '',
-            'source_database' => '',
-            'mysql_password_file' => '/root/.mysql_pass',
+            'source_database' => self::SCRIPT_SOURCE_DATABASE,
+            'mysql_password_file' => self::SCRIPT_MYSQL_PASSWORD_FILE,
             'ssl_registration_email' => $parentDomain !== '' ? 'admin@'.$parentDomain : '',
             'website_username' => '',
         ];
@@ -404,9 +408,9 @@ SH, [$run->subdomain, $run->parent_domain, $run->source_database, $run->mysql_pa
     {
         $authSite = trim((string) $setup->auth_site_domain);
         if ($authSite === '' || ! str_contains($authSite, '.')) {
-            return '';
+            return self::SCRIPT_PARENT_DOMAIN;
         }
 
-        return substr($authSite, strpos($authSite, '.') + 1);
+        return substr($authSite, strpos($authSite, '.') + 1) ?: self::SCRIPT_PARENT_DOMAIN;
     }
 }

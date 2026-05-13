@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\MonitoredWebsiteController;
 use App\Http\Controllers\Api\SetupController;
 use App\Http\Controllers\Api\TerminalController;
+use App\Http\Controllers\Api\WebsiteDeletionController;
 use App\Http\Controllers\Api\WebsiteProvisionController;
 use Illuminate\Support\Facades\Route;
 
@@ -37,6 +38,10 @@ Route::middleware('web')->group(function (): void {
             Route::get('website-provision/runs/{run}', [WebsiteProvisionController::class, 'show']);
             Route::post('website-provision/runs/{run}/run-all', [WebsiteProvisionController::class, 'runAll']);
             Route::post('website-provision/runs/{run}/steps/{step}', [WebsiteProvisionController::class, 'runStep']);
+
+            Route::post('websites/{website}/deletion-runs', [WebsiteDeletionController::class, 'store']);
+            Route::post('website-deletion/runs/{run}/run-all', [WebsiteDeletionController::class, 'runAll']);
+            Route::post('website-deletion/runs/{run}/steps/{step}', [WebsiteDeletionController::class, 'runStep']);
         });
     });
 });

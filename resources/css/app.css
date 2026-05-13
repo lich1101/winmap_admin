@@ -475,6 +475,11 @@ td strong { display: block; }
 .success-box { background: #e7f8ef; border: 1px solid #c5edd9; color: #147249; border-radius: var(--radius-sm); padding: 12px 14px; font-weight: 800; }
 .error-box.wide { margin-bottom: 16px; }
 .success-box.wide { margin-bottom: 16px; }
+.danger-box { display: grid; gap: 6px; background: #fff1f2; border: 1px solid #fecdd3; color: #9f1239; border-radius: var(--radius-sm); padding: 12px 14px; font-weight: 800; }
+.danger-box small { color: #be123c; font-weight: 700; }
+.danger-button { border: none; border-radius: var(--radius-sm); padding: 10px 14px; background: #dc2626; color: #fff; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; box-shadow: 0 10px 20px rgba(220,38,38,0.18); }
+.danger-button.full { width: 100%; }
+.danger-button:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
 .muted-note { color: var(--muted); margin-top: 4px; }
 .muted-alert { color: var(--amber); margin-top: 4px; }
 

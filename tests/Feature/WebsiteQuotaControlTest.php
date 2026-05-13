@@ -9,6 +9,7 @@ use App\Services\DrupalAuthenticationService;
 use App\Services\DrupalSiteDiscoveryService;
 use App\Services\RemoteServerService;
 use App\Models\WebsiteProvisionRun;
+use App\Models\WebsiteDeletionRun;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Config;
@@ -754,13 +755,16 @@ HTML;
 
         $response = $this->actingAs($admin)->postJson('/api/website-provision/runs', [
             'subdomain' => 'newcode',
-            'source_database' => 'inventory',
-            'website_username' => 'administrator',
-            'website_password' => 'site-secret',
         ]);
 
         $response->assertCreated()
             ->assertJsonPath('data.full_domain', 'newcode.winmap.vn')
+            ->assertJsonPath('data.parent_domain', 'winmap.vn')
+            ->assertJsonPath('data.www_root', 'httpdocs_inventory')
+            ->assertJsonPath('data.system_user', 'ftp_winmap.vn')
+            ->assertJsonPath('data.source_database', 'inventory')
+            ->assertJsonPath('data.mysql_password_file', '/root/.mysql_pass')
+            ->assertJsonPath('data.ssl_registration_email', 'admin@winmap.vn')
             ->assertJsonPath('data.steps.0.key', 'create_subdomain')
             ->assertJsonCount(5, 'data.steps');
     }
@@ -823,5 +827,110 @@ HTML;
         $this->assertNotNull($website);
         $this->assertSame('administrator', $website->website_username);
         $this->assertTrue($website->has_website_password);
+    }
+
+    public function test_admin_can_create_website_deletion_run_with_confirmation(): void
+    {
+        SetupConfiguration::query()->create([
+            'is_completed' => true,
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/var/www/vhosts/winmap.vn/httpdocs_inventory',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'enter.winmap.vn',
+        ]);
+
+        $website = MonitoredWebsite::query()->create([
+            'name' => 'Demo',
+            'domain' => 'demo.winmap.vn',
+            'usage_endpoint_url' => 'https://demo.winmap.vn/application/site-usage/json',
+            'config_endpoint_url' => 'https://demo.winmap.vn/application/site-usage/quota/config',
+            'enabled' => true,
+            'quota_bytes' => 0,
+            'warning_threshold_percent' => 85,
+        ]);
+
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->postJson("/api/websites/{$website->id}/deletion-runs", [
+            'confirmation' => 'demo.winmap.vn',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.domain', 'demo.winmap.vn')
+            ->assertJsonPath('data.subdomain', 'demo')
+            ->assertJsonPath('data.parent_domain', 'winmap.vn')
+            ->assertJsonPath('data.database_name', 'demo')
+            ->assertJsonPath('data.steps.0.key', 'remove_subdomain')
+            ->assertJsonCount(4, 'data.steps');
+    }
+
+    public function test_admin_can_run_all_deletion_steps_and_remove_website_record(): void
+    {
+        SetupConfiguration::query()->create([
+            'is_completed' => true,
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/var/www/vhosts/winmap.vn/httpdocs_inventory',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'enter.winmap.vn',
+        ]);
+
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $website = MonitoredWebsite::query()->create([
+            'name' => 'Demo',
+            'domain' => 'demo.winmap.vn',
+            'usage_endpoint_url' => 'https://demo.winmap.vn/application/site-usage/json',
+            'config_endpoint_url' => 'https://demo.winmap.vn/application/site-usage/quota/config',
+            'enabled' => true,
+            'quota_bytes' => 0,
+            'warning_threshold_percent' => 85,
+        ]);
+
+        $run = WebsiteDeletionRun::query()->create([
+            'user_id' => $admin->id,
+            'monitored_website_id' => $website->id,
+            'domain' => 'demo.winmap.vn',
+            'subdomain' => 'demo',
+            'parent_domain' => 'winmap.vn',
+            'project_path' => '/var/www/vhosts/winmap.vn/httpdocs_inventory',
+            'system_user' => 'ftp_winmap.vn',
+            'database_name' => 'demo',
+            'status' => 'pending',
+            'steps' => [
+                ['key' => 'remove_subdomain', 'label' => 'Xóa subdomain Plesk', 'status' => 'pending', 'output' => '', 'description' => '', 'command_preview' => 'a'],
+                ['key' => 'remove_directories', 'label' => 'Xóa thư mục site', 'status' => 'pending', 'output' => '', 'description' => '', 'command_preview' => 'b'],
+                ['key' => 'remove_database', 'label' => 'Xóa database', 'status' => 'pending', 'output' => '', 'description' => '', 'command_preview' => 'c'],
+                ['key' => 'remove_admin_record', 'label' => 'Xóa khỏi admin', 'status' => 'pending', 'output' => '', 'description' => '', 'command_preview' => 'd'],
+            ],
+        ]);
+
+        $remote = Mockery::mock(RemoteServerService::class);
+        $remote->shouldReceive('runManagedShellScript')->times(3)->andReturn([
+            'stdout' => 'ok',
+            'stderr' => '',
+            'exit_code' => 0,
+        ]);
+        $this->app->instance(RemoteServerService::class, $remote);
+
+        $response = $this->actingAs($admin)->postJson("/api/website-deletion/runs/{$run->id}/run-all");
+
+        $response->assertOk()
+            ->assertJsonPath('data.status', 'completed');
+
+        $this->assertDatabaseMissing('monitored_websites', [
+            'domain' => 'demo.winmap.vn',
+        ]);
     }
 }

@@ -43,7 +43,7 @@ https://<domain>/application/site-usage/quota/config
 ```
 
 Leave the per-website API key and website credential fields empty when the site should use the defaults saved in setup.
-Manual website creation saves the record first and does not call the quota config endpoint unless `sync_now` is explicitly requested. Use this for sites that already exist but may not have SSL/endpoints ready yet; use the provisioning flow for brand-new subdomains.
+Manual website creation is only for adding an already-existing site to monitoring. It saves the record first and does not call the quota config endpoint unless `sync_now` is explicitly requested. Use the provisioning flow for brand-new subdomains.
 
 When a site exceeds quota, the Drupal module blocks normal HTML pages and normal APIs. Only the quota/usage management endpoints remain open so this admin panel can still unlock the site by raising quota.
 
@@ -225,7 +225,7 @@ This wizard-backed setup is now the primary flow.
 
 ## Step-by-step website provisioning
 
-The dashboard now includes a dedicated action `Khởi tạo website` separate from manual `Thêm website`.
+The dashboard now includes a dedicated action `Tạo website mới` separate from manual `Thêm site đã có`.
 
 This provisioning flow is modeled after the current shell script and runs each step independently over SSH:
 
@@ -243,16 +243,33 @@ Each provisioning run:
 - allows running all remaining steps
 - automatically registers the new website into monitored websites after all steps succeed
 
+By default, the UI creates the provisioning run and immediately runs all steps, matching the original shell-script behavior. Operators can uncheck this option when they want to create a run first and execute steps one by one.
+
 Inputs required in the provisioning drawer:
 
 - `subdomain`
-- `parent_domain`
-- `www_root`
-- `system_user`
-- `source_database`
-- `mysql_password_file`
-- `ssl_registration_email`
-- optional website credential to attach to the monitored website record
+
+The remaining values follow the shell-script defaults automatically:
+
+- `parent_domain`: `winmap.vn`
+- `www_root`: `httpdocs_inventory`
+- `system_user`: `ftp_winmap.vn`
+- `source_database`: `inventory`
+- `mysql_password_file`: `/root/.mysql_pass`
+- `ssl_registration_email`: `admin@winmap.vn`
+
+## Website Deletion
+
+The dashboard delete action creates a guarded deletion run instead of immediately removing only the admin record. The user must type the full domain before any destructive action can run.
+
+Deletion runs remove the resources created by the provisioning script:
+
+1. Remove the Plesk subdomain.
+2. Remove `sites/<domain>` and `sites/private/<domain>`.
+3. Remove the Plesk database named after the subdomain.
+4. Remove the monitored website record and its usage snapshots from Winmap Admin.
+
+Each deletion run stores step status, command output, progress, and can rerun a failed step.
 
 ### Useful Docker commands
 
@@ -281,8 +298,16 @@ Do not add dangerous commands such as `rm`, `sh`, `bash`, `php`, `python`, or pa
 
 ### 2026-05-13 Align Manual Website Creation With Provisioning
 
-- **Done:** Manual website creation now derives name, usage endpoint, and quota config endpoint from the domain when fields are left empty, and skips immediate quota sync by default.
+- **Done:** Manual website creation now derives name, usage endpoint, and quota config endpoint from the domain when fields are left empty, skips immediate quota sync by default, and is labeled as adding an existing site. The provisioning form only requires subdomain input, fills shell-script defaults automatically, and can immediately execute all steps like the original script.
 - **Why:** Operators should only need to enter the domain for standard Winmap Drupal multisite endpoints.
 - **Issues:** The previous form showed endpoint placeholders but still required manual usage endpoint input, then tried to sync quota before newly provisioned sites had SSL.
 - **Fixes:** Added frontend auto-fill plus backend derivation so direct API calls also work; added opt-in immediate sync for already-ready sites.
-- **Next steps:** Use `Khởi tạo website` for new subdomains so SSL, folders, settings, and database are completed before monitoring.
+- **Next steps:** Use `Tạo website mới` for new subdomains so SSL, folders, settings, and database are completed before monitoring.
+
+### 2026-05-13 Guarded Website Deletion Runs
+
+- **Done:** Added deletion runs with typed confirmation, step progress, logs, and cleanup of Plesk subdomain, site directories, database, and admin record.
+- **Why:** Deleting a provisioned website must undo all resources created by the script, not only remove the monitoring row.
+- **Issues:** The old delete action only removed the website from the admin list.
+- **Fixes:** Added backend run storage/service/API and a guarded frontend drawer for destructive deletion.
+- **Next steps:** Verify Plesk delete commands on the production server because CLI behavior can differ by Plesk version.

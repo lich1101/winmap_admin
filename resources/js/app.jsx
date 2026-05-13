@@ -761,6 +761,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
   const [notice, setNotice] = useState('');
   const [editing, setEditing] = useState(null);
   const [provisioningOpen, setProvisioningOpen] = useState(false);
+  const [deletingWebsite, setDeletingWebsite] = useState(null);
   const [refreshingId, setRefreshingId] = useState(null);
   const [discovering, setDiscovering] = useState(false);
   const [bulkRefreshing, setBulkRefreshing] = useState(false);
@@ -945,10 +946,8 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
     await loadDashboard();
   }
 
-  async function deleteWebsite(id) {
-    if (!window.confirm('Xóa website này khỏi danh sách giám sát?')) return;
-    await api(`/api/websites/${id}`, { method: 'DELETE' });
-    await loadDashboard();
+  function deleteWebsite(site) {
+    setDeletingWebsite(site);
   }
 
   async function syncDiscoveredWebsites() {
@@ -1065,6 +1064,18 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
           }}
         />
       )}
+
+      {deletingWebsite && (
+        <WebsiteDeletionDrawer
+          website={deletingWebsite}
+          onClose={() => setDeletingWebsite(null)}
+          onDeleted={async () => {
+            setDeletingWebsite(null);
+            await loadDashboard();
+            setNotice(`Đã xóa website ${deletingWebsite.domain} và các tài nguyên liên quan.`);
+          }}
+        />
+      )}
     </main>
   );
 }
@@ -1161,8 +1172,8 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
             {discovering ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
             Quét multisite
           </button>
-          <button className="ghost-button" onClick={onProvision}><Server size={16} />Khởi tạo website</button>
-          <button className="primary-button" onClick={onCreate}><Plus size={17} />Thêm website</button>
+          <button className="primary-button" onClick={onProvision}><Server size={16} />Tạo website mới</button>
+          <button className="ghost-button" onClick={onCreate}><Plus size={17} />Thêm site đã có</button>
         </div>
       </div>
 
@@ -1346,7 +1357,7 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
                           {refreshingId === site.id ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
                         </button>
                         <button onClick={() => onEdit(site)} title="Sửa"><Save size={16} /></button>
-                        <button onClick={() => onDelete(site.id)} title="Xóa"><Trash2 size={16} /></button>
+                        <button onClick={() => onDelete(site)} title="Xóa sạch website"><Trash2 size={16} /></button>
                       </div>
                     </div>
                   </td>
@@ -1505,8 +1516,8 @@ function WebsiteDrawer({ website, setup, onClose, onSaved }) {
       <aside className="drawer">
         <div className="panel-header">
           <div>
-            <h2>{isEdit ? 'Sửa website' : 'Thêm website'}</h2>
-            <p>Cấu hình quota, endpoint đo dung lượng và credential quản trị website.</p>
+            <h2>{isEdit ? 'Sửa website' : 'Thêm site đã có'}</h2>
+            <p>{isEdit ? 'Cấu hình quota, endpoint đo dung lượng và credential quản trị website.' : 'Chỉ lưu một website đã tồn tại vào danh sách theo dõi, không tạo subdomain/folder/database trên server.'}</p>
           </div>
           <button className="ghost-button" onClick={onClose}>Đóng</button>
         </div>
@@ -1548,6 +1559,183 @@ function WebsiteDrawer({ website, setup, onClose, onSaved }) {
   );
 }
 
+function WebsiteDeletionDrawer({ website, onClose, onDeleted }) {
+  const [confirmation, setConfirmation] = useState('');
+  const [runNow, setRunNow] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [currentRun, setCurrentRun] = useState(null);
+
+  const steps = currentRun?.steps || [];
+  const progress = steps.length > 0
+    ? Math.round((steps.filter((step) => step.status === 'success').length / steps.length) * 100)
+    : 0;
+  const canSubmit = confirmation === website.domain;
+
+  async function createDeletionRun(event) {
+    event.preventDefault();
+    if (!canSubmit) {
+      setError(`Nhập chính xác "${website.domain}" để xác nhận xóa.`);
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const payload = await api(`/api/websites/${website.id}/deletion-runs`, {
+        method: 'POST',
+        body: {
+          confirmation,
+          run_now: runNow,
+        },
+      });
+      setCurrentRun(payload.data);
+      if (payload.data.status === 'completed') {
+        await onDeleted();
+        return;
+      }
+      if (payload.data.status === 'failed') {
+        setError(`Xóa website dừng ở bước lỗi. Kiểm tra log bên dưới rồi chạy lại bước lỗi.`);
+      } else {
+        setNotice(`Đã tạo deletion run cho ${website.domain}.`);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function executeStep(stepKey) {
+    if (!currentRun) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const payload = await api(`/api/website-deletion/runs/${currentRun.id}/steps/${stepKey}`, { method: 'POST' });
+      setCurrentRun(payload.data);
+      if (payload.data.status === 'completed') {
+        await onDeleted();
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function executeAll() {
+    if (!currentRun) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const payload = await api(`/api/website-deletion/runs/${currentRun.id}/run-all`, { method: 'POST' });
+      setCurrentRun(payload.data);
+      if (payload.data.status === 'completed') {
+        await onDeleted();
+      } else if (payload.data.status === 'failed') {
+        setError(`Xóa website dừng ở bước lỗi. Kiểm tra log bên dưới rồi chạy lại bước lỗi.`);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="drawer-backdrop">
+      <aside className="drawer drawer-wide">
+        <div className="panel-header">
+          <div>
+            <h2>Xóa sạch website</h2>
+            <p>Xóa các tài nguyên đã tạo bởi script: subdomain Plesk, thư mục site, database và record trong admin.</p>
+          </div>
+          <button className="ghost-button" onClick={onClose}>Đóng</button>
+        </div>
+
+        {error && <div className="error-box wide">{error}</div>}
+        {notice && <div className="success-box wide">{notice}</div>}
+
+        <form onSubmit={createDeletionRun} className="drawer-form">
+          <div className="danger-box">
+            <strong>Thao tác này sẽ xóa thật trên server.</strong>
+            <small>Website: {website.domain}. Database dự kiến: {website.domain.split('.')[0]}. Thư mục dự kiến: sites/{website.domain} và sites/private/{website.domain}.</small>
+          </div>
+          <label>
+            Nhập domain để xác nhận xóa
+            <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder={website.domain} required />
+          </label>
+          <label className="check-line">
+            <input type="checkbox" checked={runNow} onChange={(event) => setRunNow(event.target.checked)} />
+            Xóa ngay sau khi tạo run
+          </label>
+          <button className="danger-button full" disabled={busy || !canSubmit}>
+            {busy ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
+            {runNow ? 'Xóa website ngay' : 'Tạo deletion run'}
+          </button>
+        </form>
+
+        {currentRun ? (
+          <section className="provision-run-panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>Run xóa: {currentRun.domain}</h2>
+                <p>Có thể chạy tiếp toàn bộ hoặc chạy lại riêng step lỗi.</p>
+              </div>
+              <div className="panel-actions">
+                <ProvisionStatus status={currentRun.status} />
+                <button className="danger-button" type="button" onClick={executeAll} disabled={busy || currentRun.status === 'completed'}>
+                  {busy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+                  Chạy toàn bộ
+                </button>
+              </div>
+            </div>
+
+            <div className="provision-progress">
+              <div className="batch-progress-head">
+                <strong>{progress}% hoàn tất</strong>
+                <span>{steps.filter((step) => step.status === 'success').length}/{steps.length} bước</span>
+              </div>
+              <div className="batch-progress-track">
+                <span style={{ width: `${progress}%` }} />
+              </div>
+            </div>
+
+            <div className="provision-step-list">
+              {steps.map((step, index) => (
+                <article className={`provision-step-card status-${step.status || 'pending'}`} key={step.key}>
+                  <div className="provision-step-head">
+                    <div>
+                      <strong>Bước {index + 1}: {step.label}</strong>
+                      <small>{step.description}</small>
+                      {step.status === 'failed' && step.output ? <small className="step-error" title={step.output}><CircleAlert size={14} />Di chuột để xem lỗi đầy đủ</small> : null}
+                    </div>
+                    <button
+                      type="button"
+                      className={step.status === 'success' ? 'ghost-button' : 'danger-button'}
+                      onClick={() => executeStep(step.key)}
+                      disabled={busy || step.status === 'running' || step.status === 'success' || currentRun.status === 'completed'}
+                    >
+                      {busy && currentRun.current_step === step.key ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+                      {step.status === 'failed' ? 'Chạy lại bước lỗi' : (step.status === 'success' ? 'Đã xong' : 'Chạy bước này')}
+                    </button>
+                  </div>
+                  <small className="command-preview">{step.command_preview}</small>
+                  <pre className="provision-output">{step.output || 'Chưa có output cho bước này.'}</pre>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </aside>
+    </div>
+  );
+}
+
 function WebsiteProvisionDrawer({ onClose, onCreated }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -1573,6 +1761,7 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
     website_username: '',
     website_password: '',
   });
+  const [autoRun, setAutoRun] = useState(true);
   const [runs, setRuns] = useState([]);
   const [currentRun, setCurrentRun] = useState(null);
 
@@ -1625,7 +1814,21 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
       const payload = await api('/api/website-provision/runs', { method: 'POST', body: form });
       setCurrentRun(payload.data);
       await loadRuns();
-      setNotice(`Đã tạo provisioning run cho ${payload.data.full_domain}.`);
+      if (!autoRun) {
+        setNotice(`Đã tạo provisioning run cho ${payload.data.full_domain}. Bấm "Chạy toàn bộ" để tạo website trên server.`);
+        return;
+      }
+
+      setNotice(`Đã tạo provisioning run cho ${payload.data.full_domain}. Đang chạy toàn bộ các bước trên server...`);
+      const runPayload = await api(`/api/website-provision/runs/${payload.data.id}/run-all`, { method: 'POST' });
+      setCurrentRun(runPayload.data);
+      await loadRuns();
+      if (runPayload.data.status === 'completed') {
+        setNotice(`Website ${runPayload.data.full_domain} đã khởi tạo xong.`);
+        await onCreated();
+      } else if (runPayload.data.status === 'failed') {
+        setError(`Khởi tạo website dừng ở bước lỗi. Xem log trong run ${runPayload.data.full_domain}.`);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -1697,8 +1900,8 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
       <aside className="drawer drawer-wide">
         <div className="panel-header">
           <div>
-            <h2>Khởi tạo website từng bước</h2>
-            <p>Tách đúng theo script: tạo subdomain, SSL, copy folder, sửa settings và clone database.</p>
+            <h2>Tạo website mới</h2>
+            <p>Chạy đúng theo script: tạo subdomain, SSL, copy folder, sửa settings và clone database.</p>
           </div>
           <div className="panel-actions">
             <button className="ghost-button" onClick={resetRun}>Run mới</button>
@@ -1712,27 +1915,16 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
             {notice && <div className="success-box wide">{notice}</div>}
 
             <form onSubmit={createRun} className="drawer-form">
-              <div className="form-grid three-up">
-                <label>Subdomain mới<input value={form.subdomain} onChange={(event) => update('subdomain', event.target.value)} placeholder="newcode" required /></label>
-                <label>Domain cha<input value={form.parent_domain} onChange={(event) => update('parent_domain', event.target.value)} placeholder="winmap.vn" required /></label>
-                <div className="button-stack">
-                  <button type="button" className="ghost-button" onClick={applyDefaults}><RefreshCw size={16} />Nạp mặc định</button>
-                </div>
+              <label>Subdomain mới<input value={form.subdomain} onChange={(event) => update('subdomain', event.target.value)} placeholder="newcode" required /></label>
+
+              <div className="info-strip">
+                Hệ thống sẽ dùng đúng mặc định như script: domain cha <strong>{form.parent_domain || 'winmap.vn'}</strong>, www root <strong>{form.www_root || 'httpdocs_inventory'}</strong>, system user <strong>{form.system_user || 'ftp_winmap.vn'}</strong>, source DB <strong>{form.source_database || 'inventory'}</strong>, MySQL pass file <strong>{form.mysql_password_file || '/root/.mysql_pass'}</strong>, SSL email <strong>{form.ssl_registration_email || 'admin@winmap.vn'}</strong>.
               </div>
 
-              <div className="form-grid three-up">
-                <label>www root<input value={form.www_root} onChange={(event) => update('www_root', event.target.value)} placeholder="httpdocs_inventory" required /></label>
-                <label>System user<input value={form.system_user} onChange={(event) => update('system_user', event.target.value)} placeholder="ftp_winmap.vn" required /></label>
-                <label>Source database<input value={form.source_database} onChange={(event) => update('source_database', event.target.value)} placeholder="inventory" required /></label>
-              </div>
-
-              <div className="form-grid three-up">
-                <label>MySQL root password file<input value={form.mysql_password_file} onChange={(event) => update('mysql_password_file', event.target.value)} placeholder="/root/.mysql_pass" required /></label>
-                <label>Email đăng ký SSL<input value={form.ssl_registration_email} onChange={(event) => update('ssl_registration_email', event.target.value)} type="email" placeholder="admin@winmap.vn" required /></label>
-                <label>Tài khoản website<input value={form.website_username} onChange={(event) => update('website_username', event.target.value)} placeholder="administrator" /></label>
-              </div>
-
-              <label>Mật khẩu website<input value={form.website_password} onChange={(event) => update('website_password', event.target.value)} type="password" placeholder="Lưu kèm website vừa tạo để quản lý sau này" /></label>
+              <label className="check-line">
+                <input type="checkbox" checked={autoRun} onChange={(event) => setAutoRun(event.target.checked)} />
+                Tạo website ngay sau khi lưu run (chạy toàn bộ các bước như script)
+              </label>
 
               <div className="wizard-actions split">
                 <div className="provision-hint">
@@ -1740,7 +1932,7 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
                 </div>
                 <button className="primary-button" disabled={busy}>
                   {busy ? <Loader2 className="spin" size={16} /> : <Plus size={16} />}
-                  Tạo provisioning run
+                  {autoRun ? 'Tạo website ngay' : 'Tạo provisioning run'}
                 </button>
               </div>
             </form>

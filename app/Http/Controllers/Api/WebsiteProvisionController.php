@@ -25,7 +25,7 @@ class WebsiteProvisionController extends Controller
             'parent_domain' => ['nullable', 'string', 'max:255'],
             'www_root' => ['nullable', 'string', 'max:255'],
             'system_user' => ['nullable', 'string', 'max:255'],
-            'source_database' => ['required', 'string', 'max:255'],
+            'source_database' => ['nullable', 'string', 'max:255'],
             'mysql_password_file' => ['nullable', 'string', 'max:1000'],
             'ssl_registration_email' => ['nullable', 'email:rfc', 'max:255'],
             'website_username' => ['nullable', 'string', 'max:255'],
