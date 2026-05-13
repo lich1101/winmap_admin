@@ -257,6 +257,104 @@ class WebsiteQuotaControlTest extends TestCase
         $this->assertSame('warning', $website->last_status);
     }
 
+    public function test_admin_retries_usage_with_oauth_when_public_usage_endpoint_returns_login_html(): void
+    {
+        SetupConfiguration::query()->create([
+            'is_completed' => true,
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'aec.winmap.vn',
+            'default_website_username' => 'administrator',
+            'default_website_password' => 'shared-secret',
+        ]);
+
+        MonitoredWebsite::query()->create([
+            'name' => 'AEC',
+            'domain' => 'aec.winmap.vn',
+            'usage_endpoint_url' => 'https://aec.winmap.vn/application/site-usage/json',
+            'config_endpoint_url' => 'https://aec.winmap.vn/application/site-usage/quota/config',
+            'enabled' => true,
+            'quota_bytes' => 1024 * 1024 * 1024,
+            'warning_threshold_percent' => 85,
+            'user_limit' => 12,
+        ]);
+
+        $loginPage = <<<'HTML'
+<!doctype html>
+<html lang="vi">
+  <head>
+    <title>Đăng nhập | aec.winmap.vn</title>
+    <style>@import url("https://aec.winmap.vn/modules/system/system.base.css?teyd49");</style>
+  </head>
+  <body>Đăng nhập</body>
+</html>
+HTML;
+
+        $usagePayload = json_encode([
+            'status' => 'success',
+            'site' => [
+                'host' => 'aec.winmap.vn',
+                'conf_path' => 'sites/aec.winmap.vn',
+            ],
+            'disk' => [
+                'total' => [
+                    'bytes' => 300,
+                ],
+            ],
+            'database' => [
+                'total_bytes' => 33,
+            ],
+            'quota' => [
+                'is_blocked' => false,
+                'is_warning' => false,
+                'user_count' => 9,
+            ],
+            'package' => [
+                'user_count' => 9,
+            ],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        Http::fake([
+            'https://aec.winmap.vn/application/site-usage/json' => Http::sequence()
+                ->push($loginPage, 200, ['Content-Type' => 'text/html; charset=utf-8'])
+                ->push($usagePayload, 200, ['Content-Type' => 'application/json; charset=utf-8']),
+            'https://aec.winmap.vn/api/password/token' => Http::response([
+                'data' => [
+                    'access_token' => 'oauth-token-123',
+                ],
+            ], 200),
+        ]);
+
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/websites/refresh-all');
+
+        $response->assertOk()
+            ->assertJsonPath('summary.count', 1)
+            ->assertJsonPath('summary.success', 1)
+            ->assertJsonPath('summary.errors', 0);
+
+        $website = MonitoredWebsite::query()->where('domain', 'aec.winmap.vn')->firstOrFail();
+        $this->assertSame(300, $website->last_disk_bytes);
+        $this->assertSame(33, $website->last_database_bytes);
+        $this->assertSame(333, $website->last_project_bytes);
+        $this->assertSame(9, $website->last_user_count);
+        $this->assertSame('ok', $website->last_status);
+
+        Http::assertSent(fn ($request) => $request->url() === 'https://aec.winmap.vn/api/password/token');
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://aec.winmap.vn/application/site-usage/json'
+                && (($request->header('Authorization')[0] ?? null) === 'Bearer oauth-token-123');
+        });
+    }
+
     public function test_admin_can_login_with_account_name_like_web_login(): void
     {
         User::factory()->create([

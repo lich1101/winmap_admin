@@ -86,6 +86,14 @@ function websiteHomeUrl(site) {
   return domain ? `https://${domain}` : '#';
 }
 
+function websiteHasCredentialFallback(site, setup) {
+  if (site?.uses_default_credentials) {
+    return Boolean(setup?.default_website_username && setup?.has_default_website_password);
+  }
+
+  return Boolean(site?.website_username && site?.has_website_password);
+}
+
 const maintenanceOperations = {
   'clear-cache': {
     route: 'clear-cache',
@@ -1055,7 +1063,13 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
                       ? `Credential: mặc định${setup.default_website_username ? ` (${setup.default_website_username})` : ''} · ${setup.has_default_website_password ? 'đã lưu mật khẩu mặc định' : 'chưa có mật khẩu mặc định'}`
                       : `Credential riêng: ${site.website_username || 'chưa điền'} · ${site.has_website_password ? 'đã lưu mật khẩu riêng' : 'chưa có mật khẩu riêng'}`}
                   </small>
-                  {site.has_api_key ? null : <small className="muted-alert">Chưa có API key nên chưa đẩy quota tự động xuống site. Việc đọc usage vẫn chạy được nếu usage endpoint của site không khóa key.</small>}
+                  {site.has_api_key ? null : (
+                    <small className="muted-alert">
+                      {websiteHasCredentialFallback(site, setup)
+                        ? 'Chưa có API key nên chưa đẩy quota tự động xuống site. Việc đọc usage sẽ fallback qua credential quản trị đã lưu nếu endpoint khóa key.'
+                        : 'Chưa có API key nên chưa đẩy quota tự động xuống site. Nếu endpoint khóa key thì cần lưu API key hoặc credential quản trị để đọc usage.'}
+                    </small>
+                  )}
                 </td>
                 <td>
                   <strong>{site.last_project_human}</strong>

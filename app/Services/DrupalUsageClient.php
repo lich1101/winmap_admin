@@ -22,16 +22,7 @@ class DrupalUsageClient
         $checkedAt = now();
 
         try {
-            $response = Http::acceptJson()
-                ->timeout(20)
-                ->withHeaders($website->api_key ? ['X-Winmap-Site-Usage-Key' => $website->api_key] : [])
-                ->get($website->usage_endpoint_url);
-
-            if (! $response->successful()) {
-                throw new \RuntimeException('Usage endpoint returned HTTP '.$response->status());
-            }
-
-            $payload = $this->decodeJsonResponse($response, 'Usage endpoint');
+            $payload = $this->fetchUsagePayload($website);
 
             $sitePayload = $this->pickSitePayload($payload, $website);
             $quota = Arr::get($sitePayload, 'quota', []);
@@ -97,6 +88,39 @@ class DrupalUsageClient
                 'error' => $e->getMessage(),
                 'checked_at' => $checkedAt,
             ]);
+        }
+    }
+
+    private function fetchUsagePayload(MonitoredWebsite $website): array
+    {
+        $response = $this->sendUsageRequest($website);
+
+        try {
+            if (! $response->successful()) {
+                throw $this->httpErrorException($response, 'Usage endpoint');
+            }
+
+            return $this->decodeJsonResponse($response, 'Usage endpoint');
+        } catch (Throwable $initialException) {
+            if (! $this->shouldRetryUsageWithOAuth($website, $response)) {
+                throw $initialException;
+            }
+
+            $credentials = $this->websiteCredentials($website);
+            $baseUrl = $this->websiteBaseUrl($website);
+
+            try {
+                $token = $this->requestDrupalAccessToken($baseUrl, $credentials['username'], $credentials['password']);
+                $authedResponse = $this->sendUsageRequest($website, $token);
+
+                if (! $authedResponse->successful()) {
+                    throw $this->httpErrorException($authedResponse, 'Usage endpoint');
+                }
+
+                return $this->decodeJsonResponse($authedResponse, 'Usage endpoint');
+            } catch (Throwable $oauthException) {
+                throw new RuntimeException($initialException->getMessage().' | OAuth fallback failed: '.$oauthException->getMessage(), 0, $oauthException);
+            }
         }
     }
 
@@ -205,6 +229,20 @@ class DrupalUsageClient
         throw new RuntimeException($label.' did not return valid JSON: '.$snippet);
     }
 
+    private function sendUsageRequest(MonitoredWebsite $website, ?string $bearerToken = null): Response
+    {
+        $request = Http::acceptJson()
+            ->timeout(20);
+
+        if ($bearerToken !== null && $bearerToken !== '') {
+            $request = $request->withToken($bearerToken);
+        } elseif ($website->api_key) {
+            $request = $request->withHeaders(['X-Winmap-Site-Usage-Key' => $website->api_key]);
+        }
+
+        return $request->get($website->usage_endpoint_url);
+    }
+
     private function decodeJsonString(string $body): ?array
     {
         $normalized = ltrim($body, "\xEF\xBB\xBF\x00\x1A \t\r\n");
@@ -266,6 +304,51 @@ class DrupalUsageClient
     private function nullableIntegerValue(mixed $value): ?int
     {
         return $value === null ? null : (int) $value;
+    }
+
+    private function shouldRetryUsageWithOAuth(MonitoredWebsite $website, Response $response): bool
+    {
+        $credentials = $this->websiteCredentials($website);
+        if ($credentials['username'] === '' || $credentials['password'] === '') {
+            return false;
+        }
+
+        if ($this->websiteBaseUrl($website) === '') {
+            return false;
+        }
+
+        return in_array($response->status(), [401, 403], true)
+            || $this->responseLooksLikeHtml($response);
+    }
+
+    private function responseLooksLikeHtml(Response $response): bool
+    {
+        $contentType = strtolower((string) $response->header('Content-Type'));
+        $body = ltrim((string) $response->body());
+        $prefix = strtolower(substr($body, 0, 500));
+
+        return str_contains($contentType, 'text/html')
+            || str_starts_with($prefix, '<!doctype html')
+            || str_starts_with($prefix, '<html')
+            || str_contains($prefix, '<head')
+            || str_contains($prefix, '<body')
+            || str_contains($prefix, 'dang nhap')
+            || str_contains($prefix, 'đăng nhập')
+            || str_contains($prefix, 'system.base.css')
+            || str_contains($prefix, 'user/login');
+    }
+
+    private function httpErrorException(Response $response, string $label): RuntimeException
+    {
+        $payload = $this->decodeJsonString((string) $response->body());
+        $message = trim((string) Arr::get($payload ?? [], 'message', ''));
+        if ($message === '') {
+            $message = trim(preg_replace('/\s+/', ' ', strip_tags((string) $response->body())) ?? '');
+        }
+
+        return new RuntimeException(
+            $label.' returned HTTP '.$response->status().($message !== '' ? ': '.substr($message, 0, 500) : '')
+        );
     }
 
     private function headers(MonitoredWebsite $website): array
