@@ -950,10 +950,6 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
-          <h1>Winmap Admin</h1>
-          <p className="topbar-sub">Kiểm soát dung lượng website · {setup.server_host}:{setup.server_port} · {setup.drupal_project_path} · website auth: {setup.auth_site_domain}</p>
-        </div>
         <div className="topbar-actions">
           <button className="ghost-button" onClick={onOpenSetup}><Settings2 size={16} />Cấu hình setup</button>
           <span className="user-chip"><ShieldCheck size={16} />{user.name}</span>
@@ -1065,7 +1061,6 @@ function MaintenanceBatchPanel({ setup, websites, batch, onRun }) {
       <div className="panel-header compact">
         <div>
           <h2>Bảo trì hàng loạt</h2>
-          <p>Chạy tuần tự qua API từng website để tránh dồn tải server.</p>
         </div>
         <Activity size={20} />
       </div>
@@ -1138,10 +1133,6 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
   return (
     <section className="panel website-panel">
       <div className="panel-header">
-        <div>
-          <h2>Website đang giám sát</h2>
-          <p>Danh sách này lấy site từ multisite Drupal, sau đó gọi usage endpoint của từng site để đọc disk, database và tổng dung lượng thực tế.</p>
-        </div>
         <div className="panel-actions">
           <button className="ghost-button" onClick={() => onRefreshAll(false)} disabled={bulkRefreshing}>
             {bulkRefreshing ? <Loader2 className="spin" size={16} /> : <Database size={16} />}
@@ -1389,8 +1380,7 @@ function TerminalPanel({ onError, projectPath }) {
     <section className="panel terminal-panel">
       <div className="panel-header">
         <div>
-          <h2>Terminal có kiểm soát</h2>
-          <p>Command được chạy qua SSH trên server Drupal đã setup, chỉ cho phép allowlist và lưu audit log.</p>
+          <h2>Terminal Server</h2>
         </div>
         <Terminal />
       </div>
