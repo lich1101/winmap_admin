@@ -86,6 +86,25 @@ function websiteHomeUrl(site) {
   return domain ? `https://${domain}` : '#';
 }
 
+function normalizeWebsiteDomain(domain) {
+  return (domain || '')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/.*$/, '');
+}
+
+function defaultUsageEndpoint(domain) {
+  const normalized = normalizeWebsiteDomain(domain);
+
+  return normalized ? `https://${normalized}/application/site-usage/json` : '';
+}
+
+function defaultConfigEndpoint(domain) {
+  const normalized = normalizeWebsiteDomain(domain);
+
+  return normalized ? `https://${normalized}/application/site-usage/quota/config` : '';
+}
+
 function websiteHasEffectiveApiKey(site, setup) {
   return Boolean(site?.has_api_key || setup?.has_default_api_key);
 }
@@ -1423,17 +1442,38 @@ function WebsiteDrawer({ website, setup, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
 
   const endpointHint = useMemo(() => {
-    if (!form.domain) return '';
-    return `https://${form.domain}/application/site-usage/json`;
+    return defaultUsageEndpoint(form.domain);
   }, [form.domain]);
 
   const configEndpointHint = useMemo(() => {
-    if (!form.domain) return '';
-    return `https://${form.domain}/application/site-usage/quota/config`;
+    return defaultConfigEndpoint(form.domain);
   }, [form.domain]);
 
   function update(key, value) {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => {
+      if (key !== 'domain') {
+        return { ...current, [key]: value };
+      }
+
+      const previousUsageEndpoint = defaultUsageEndpoint(current.domain);
+      const previousConfigEndpoint = defaultConfigEndpoint(current.domain);
+      const nextUsageEndpoint = defaultUsageEndpoint(value);
+      const nextConfigEndpoint = defaultConfigEndpoint(value);
+      const currentName = (current.name || '').trim();
+      const previousDomain = normalizeWebsiteDomain(current.domain);
+
+      return {
+        ...current,
+        domain: value,
+        name: currentName === '' || currentName === previousDomain ? normalizeWebsiteDomain(value) : current.name,
+        usage_endpoint_url: current.usage_endpoint_url === '' || current.usage_endpoint_url === previousUsageEndpoint
+          ? nextUsageEndpoint
+          : current.usage_endpoint_url,
+        config_endpoint_url: current.config_endpoint_url === '' || current.config_endpoint_url === previousConfigEndpoint
+          ? nextConfigEndpoint
+          : current.config_endpoint_url,
+      };
+    });
   }
 
   async function submit(event) {
@@ -1443,7 +1483,14 @@ function WebsiteDrawer({ website, setup, onClose, onSaved }) {
     try {
       const method = isEdit ? 'PUT' : 'POST';
       const url = isEdit ? `/api/websites/${website.id}` : '/api/websites';
-      await api(url, { method, body: form });
+      const body = {
+        ...form,
+        name: form.name || normalizeWebsiteDomain(form.domain),
+        usage_endpoint_url: form.usage_endpoint_url || defaultUsageEndpoint(form.domain),
+        config_endpoint_url: form.config_endpoint_url || defaultConfigEndpoint(form.domain),
+      };
+
+      await api(url, { method, body });
       onSaved();
     } catch (err) {
       setError(err.message);
@@ -1463,9 +1510,9 @@ function WebsiteDrawer({ website, setup, onClose, onSaved }) {
           <button className="ghost-button" onClick={onClose}>Đóng</button>
         </div>
         <form onSubmit={submit} className="drawer-form">
-          <label>Tên website<input value={form.name} onChange={(event) => update('name', event.target.value)} required /></label>
+          <label>Tên website<input value={form.name} onChange={(event) => update('name', event.target.value)} placeholder="Tự dùng domain nếu để trống" /></label>
           <label>Domain<input value={form.domain} onChange={(event) => update('domain', event.target.value)} placeholder="enter.winmap.vn" required /></label>
-          <label>Usage endpoint<input value={form.usage_endpoint_url} onChange={(event) => update('usage_endpoint_url', event.target.value)} placeholder={endpointHint || 'https://domain/application/site-usage/json'} required /></label>
+          <label>Usage endpoint<input value={form.usage_endpoint_url} onChange={(event) => update('usage_endpoint_url', event.target.value)} placeholder={endpointHint || 'Tự sinh từ domain khi lưu'} /></label>
           <label>Quota config endpoint<input value={form.config_endpoint_url} onChange={(event) => update('config_endpoint_url', event.target.value)} placeholder={configEndpointHint || 'https://domain/application/site-usage/quota/config'} /></label>
           <label>API key riêng (tùy chọn)<input value={form.api_key} onChange={(event) => update('api_key', event.target.value)} placeholder={setup?.has_default_api_key ? (isEdit ? 'Bỏ trống để giữ key cũ hoặc dùng key mặc định' : 'Để trống để dùng API key mặc định trong setup') : (isEdit ? 'Bỏ trống để giữ key cũ' : 'X-Winmap-Site-Usage-Key')} /></label>
           <div className="form-grid two-up">

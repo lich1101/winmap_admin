@@ -35,6 +35,15 @@ If the endpoint uses a key, add it in the website form. The Laravel client sends
 X-Winmap-Site-Usage-Key: <key>
 ```
 
+When manually adding a monitored website, entering the domain is enough for the default endpoint shape. The form and API derive:
+
+```text
+https://<domain>/application/site-usage/json
+https://<domain>/application/site-usage/quota/config
+```
+
+Leave the per-website API key and website credential fields empty when the site should use the defaults saved in setup.
+
 When a site exceeds quota, the Drupal module blocks normal HTML pages and normal APIs. Only the quota/usage management endpoints remain open so this admin panel can still unlock the site by raising quota.
 
 ## Setup
@@ -266,3 +275,13 @@ TERMINAL_MAX_OUTPUT_BYTES=60000
 ```
 
 Do not add dangerous commands such as `rm`, `sh`, `bash`, `php`, `python`, or package managers unless this admin panel is isolated behind VPN/IP allowlist and you accept the risk.
+
+## Development log
+
+### 2026-05-13 Simplify Manual Website Creation
+
+- **Done:** Manual website creation now derives name, usage endpoint, and quota config endpoint from the domain when fields are left empty.
+- **Why:** Operators should only need to enter the domain for standard Winmap Drupal multisite endpoints.
+- **Issues:** The previous form showed endpoint placeholders but still required manual usage endpoint input.
+- **Fixes:** Added frontend auto-fill plus backend derivation so direct API calls also work.
+- **Next steps:** Verify in the browser that custom endpoints are preserved when editing existing websites.

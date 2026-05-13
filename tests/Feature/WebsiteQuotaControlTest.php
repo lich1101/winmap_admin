@@ -91,10 +91,7 @@ class WebsiteQuotaControlTest extends TestCase
         ]);
 
         $response = $this->actingAs($admin)->postJson('/api/websites', [
-            'name' => 'Enter',
             'domain' => 'enter.winmap.vn',
-            'usage_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/json',
-            'config_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/quota/config',
             'quota_gb' => 10,
             'warning_threshold_percent' => 90,
             'enabled' => true,
@@ -102,6 +99,9 @@ class WebsiteQuotaControlTest extends TestCase
 
         $response->assertCreated()
             ->assertJsonPath('data.domain', 'enter.winmap.vn')
+            ->assertJsonPath('data.name', 'enter.winmap.vn')
+            ->assertJsonPath('data.usage_endpoint_url', 'https://enter.winmap.vn/application/site-usage/json')
+            ->assertJsonPath('data.config_endpoint_url', 'https://enter.winmap.vn/application/site-usage/quota/config')
             ->assertJsonPath('data.last_sync_status', 'ok');
 
         Http::assertSentCount(1);

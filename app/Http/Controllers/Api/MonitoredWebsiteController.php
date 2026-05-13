@@ -158,6 +158,13 @@ class MonitoredWebsiteController extends Controller
     private function validated(Request $request, ?MonitoredWebsite $website = null): array
     {
         $id = $website?->id;
+        $domain = $this->normalizedDomain((string) $request->input('domain', ''));
+        $request->merge([
+            'domain' => $domain,
+            'name' => trim((string) $request->input('name', '')) ?: $domain,
+            'usage_endpoint_url' => trim((string) $request->input('usage_endpoint_url', '')) ?: $this->defaultUsageEndpoint($domain),
+            'config_endpoint_url' => trim((string) $request->input('config_endpoint_url', '')) ?: $this->defaultConfigEndpoint($domain),
+        ]);
 
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
@@ -200,6 +207,25 @@ class MonitoredWebsiteController extends Controller
         }
 
         return $data;
+    }
+
+    private function normalizedDomain(string $domain): string
+    {
+        $domain = trim($domain);
+        $domain = preg_replace('#^https?://#i', '', $domain) ?? $domain;
+        $domain = preg_replace('#/.*$#', '', $domain) ?? $domain;
+
+        return $domain;
+    }
+
+    private function defaultUsageEndpoint(string $domain): string
+    {
+        return $domain !== '' ? 'https://'.$domain.'/application/site-usage/json' : '';
+    }
+
+    private function defaultConfigEndpoint(string $domain): string
+    {
+        return $domain !== '' ? 'https://'.$domain.'/application/site-usage/quota/config' : '';
     }
 
     private function decorate(MonitoredWebsite $website): array
