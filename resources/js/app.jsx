@@ -242,9 +242,17 @@ function LoginScreen({ onLogin }) {
   return (
     <main className="login-shell">
       <section className="login-card">
-        <div className="brand-mark"><ShieldCheck size={30} /></div>
-        <h1>Winmap Admin</h1>
-        <p>Đăng nhập bằng administrator để vào bước setup server, project Drupal 7 multisite và màn kiểm soát dung lượng.</p>
+        <div className="login-brand">
+          <div className="brand-mark"><ShieldCheck size={18} /></div>
+          <div>
+            <strong>Winmap Admin</strong>
+            <small>Quản trị dung lượng website</small>
+          </div>
+        </div>
+        <div className="login-copy">
+          <h1>Đăng nhập</h1>
+          <p>Vui lòng điền đầy đủ thông tin để tiếp tục.</p>
+        </div>
         <form onSubmit={submit} className="login-form">
           <label>
             Tài khoản administrator
@@ -254,6 +262,7 @@ function LoginScreen({ onLogin }) {
               onChange={(event) => setAccount(event.target.value)}
               type="text"
               autoComplete="username"
+              placeholder="administrator"
               required
             />
           </label>
@@ -265,6 +274,7 @@ function LoginScreen({ onLogin }) {
               onChange={(event) => setPassword(event.target.value)}
               type="password"
               autoComplete="current-password"
+              placeholder="Nhập mật khẩu"
               required
             />
           </label>
@@ -274,18 +284,8 @@ function LoginScreen({ onLogin }) {
             Đăng nhập
           </button>
         </form>
+        <p className="login-footnote">Dùng tài khoản administrator đang quản trị website Winmap của bạn.</p>
       </section>
-      <aside className="login-aside">
-        <div>
-          <span className="small-label">Storage control plane</span>
-          <h2>Setup server, quét multisite, khóa website khi vượt quota.</h2>
-        </div>
-        <div className="login-metrics">
-          <span>Drupal 7</span>
-          <span>SSH Discovery</span>
-          <span>React Admin</span>
-        </div>
-      </aside>
     </main>
   );
 }
@@ -438,8 +438,8 @@ function SetupWizard({ user, initialStatus, canCancel, onCancel, onLogout, onCom
     <main className="wizard-shell">
       <header className="topbar wizard-topbar">
         <div>
-          <span className="small-label">Winmap Admin Setup</span>
-          <h1>Thiết lập server và multisite Drupal</h1>
+          <h1>Thiết lập hệ thống</h1>
+          <p className="topbar-sub">Kết nối server Drupal, quét multisite và lưu credential administrator.</p>
         </div>
         <div className="topbar-actions">
           <span className="user-chip"><ShieldCheck size={16} />{user.name}</span>
@@ -857,9 +857,8 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <span className="small-label">Winmap Admin Backend</span>
-          <h1>Kiểm soát dung lượng website</h1>
-          <p className="topbar-sub">{setup.server_host}:{setup.server_port} · {setup.drupal_project_path} · admin auth: {setup.auth_site_domain}</p>
+          <h1>Winmap Admin</h1>
+          <p className="topbar-sub">Kiểm soát dung lượng website · {setup.server_host}:{setup.server_port} · {setup.drupal_project_path} · website auth: {setup.auth_site_domain}</p>
         </div>
         <div className="topbar-actions">
           <button className="ghost-button" onClick={onOpenSetup}><Settings2 size={16} />Cấu hình setup</button>
@@ -874,8 +873,8 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
       {loading ? <FullPageLoader /> : (
         <>
           <section className="metrics-grid">
-            <MetricCard icon={<Server />} label="Server used" value={server?.used_human || '0 B'} sub={`${server?.used_percent || 0}% của ${server?.total_human || '0 B'}`} tone="blue" percent={server?.used_percent || 0} />
-            <MetricCard icon={<HardDrive />} label="Server free" value={server?.free_human || '0 B'} sub={`${server?.remote_host || ''} · ${server?.path || '/'}`} tone="green" />
+            <MetricCard icon={<Server />} label="Đã sử dụng" value={server?.used_human || '0 B'} sub={`${server?.used_percent || 0}% của ${server?.total_human || '0 B'}`} tone="blue" percent={server?.used_percent || 0} />
+            <MetricCard icon={<HardDrive />} label="Còn trống" value={server?.free_human || '0 B'} sub={`${server?.remote_host || ''} · ${server?.path || '/'}`} tone="green" />
             <MetricCard icon={<Globe2 />} label="Website" value={summary?.website_count || 0} sub={`${summary?.warning_count || 0} sắp đầy · ${summary?.over_quota_count || 0} đã khóa`} tone="amber" />
             <MetricCard icon={<Users />} label="Tài khoản hiện tại" value={summary?.total_user_count || 0} sub="Tổng user hệ thống đã ghi nhận gần nhất" tone="slate" />
             <MetricCard icon={<Database />} label="Tổng project" value={summary?.total_project_human || '0 B'} sub={`Disk ${summary?.total_disk_human || '0 B'} · DB ${summary?.total_database_human || '0 B'}`} tone="slate" />
