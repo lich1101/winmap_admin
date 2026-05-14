@@ -7,12 +7,14 @@ import {
   CheckCircle2,
   CircleAlert,
   Database,
+  Eye,
   Globe2,
   HardDrive,
   KeyRound,
   Loader2,
   Lock,
   LogOut,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -191,6 +193,29 @@ const maintenanceOperations = {
   },
 };
 
+function patchRunStepState(run, stepKey, status = 'running') {
+  if (!run || !Array.isArray(run.steps)) {
+    return run;
+  }
+
+  return {
+    ...run,
+    status: status === 'running' ? 'running' : run.status,
+    current_step: stepKey,
+    steps: run.steps.map((step) => {
+      if (step.key === stepKey) {
+        return { ...step, status };
+      }
+
+      if (status === 'running' && step.status === 'running') {
+        return { ...step, status: 'pending' };
+      }
+
+      return step;
+    }),
+  };
+}
+
 function App() {
   const [user, setUser] = useState(null);
   const [setupStatus, setSetupStatus] = useState(null);
@@ -289,6 +314,38 @@ function FullPageLoader({ label = 'Đang nạp bảng điều khiển...' }) {
       <Loader2 className="spin" size={34} />
       <p>{label}</p>
     </div>
+  );
+}
+
+function SectionLoader({ label = 'Đang tải dữ liệu...' }) {
+  return (
+    <div className="section-loader">
+      <Loader2 className="spin" size={24} />
+      <p>{label}</p>
+    </div>
+  );
+}
+
+function IconActionButton({
+  title,
+  icon,
+  onClick,
+  disabled = false,
+  busy = false,
+  tone = 'default',
+  className = '',
+}) {
+  return (
+    <button
+      type="button"
+      className={`icon-action-button tone-${tone} ${className}`.trim()}
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+    >
+      {busy ? <Loader2 className="spin" size={16} /> : icon}
+    </button>
   );
 }
 
@@ -765,6 +822,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
   const [refreshingId, setRefreshingId] = useState(null);
   const [discovering, setDiscovering] = useState(false);
   const [bulkRefreshing, setBulkRefreshing] = useState(false);
+  const [websiteTableBusy, setWebsiteTableBusy] = useState('');
   const [websiteOperationKey, setWebsiteOperationKey] = useState('');
   const [maintenanceBatch, setMaintenanceBatch] = useState({
     running: false,
@@ -781,8 +839,10 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
   const server = dashboard?.server;
   const summary = dashboard?.summary;
 
-  async function loadDashboard() {
-    setLoading(true);
+  async function loadDashboard({ soft = false } = {}) {
+    if (!soft || !dashboard) {
+      setLoading(true);
+    }
     setError('');
     try {
       setDashboard(await api('/api/dashboard'));
@@ -793,7 +853,9 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
       }
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!soft || !dashboard) {
+        setLoading(false);
+      }
     }
   }
 
@@ -807,7 +869,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
     setNotice('');
     try {
       await api(`/api/websites/${id}/refresh`, { method: 'POST' });
-      await loadDashboard();
+      await loadDashboard({ soft: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -817,6 +879,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
 
   async function refreshAllWebsites(silent = false) {
     setBulkRefreshing(true);
+    setWebsiteTableBusy('Đang lấy số liệu cho toàn bộ bảng website...');
     setError('');
     if (!silent) {
       setNotice('');
@@ -827,11 +890,12 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
       if (!silent) {
         setNotice(payload.message || 'Đã lấy số liệu toàn bộ website.');
       }
-      await loadDashboard();
+      await loadDashboard({ soft: true });
     } catch (err) {
       setError(err.message);
     } finally {
       setBulkRefreshing(false);
+      setWebsiteTableBusy('');
     }
   }
 
@@ -853,7 +917,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
     try {
       const payload = await api(`/api/websites/${site.id}/${config.route}`, { method: 'POST' });
       setNotice(`${config.doneLabel} cho ${site.domain}: ${payload.remote?.message || 'thành công'}.`);
-      await loadDashboard();
+      await loadDashboard({ soft: true });
     } catch (err) {
       setError(`${site.domain}: ${err.message}`);
     } finally {
@@ -943,7 +1007,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
       errors,
     }));
     setNotice(`${config.doneLabel} ${targets.length} website: ${success} thành công, ${errors} lỗi${skipped ? `, bỏ qua ${skipped} site thiếu API key hiệu lực` : ''}.`);
-    await loadDashboard();
+    await loadDashboard({ soft: true });
   }
 
   function deleteWebsite(site) {
@@ -952,16 +1016,18 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
 
   async function syncDiscoveredWebsites() {
     setDiscovering(true);
+    setWebsiteTableBusy('Đang quét multisite và cập nhật lại danh sách website...');
     setError('');
     setNotice('');
     try {
       const payload = await api('/api/websites/discovery/sync', { method: 'POST' });
       setNotice(payload.message || 'Đã quét multisite thành công.');
-      await loadDashboard();
+      await loadDashboard({ soft: true });
     } catch (err) {
       setError(err.message);
     } finally {
       setDiscovering(false);
+      setWebsiteTableBusy('');
     }
   }
 
@@ -1011,6 +1077,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
                 refreshingId={refreshingId}
                 discovering={discovering}
                 bulkRefreshing={bulkRefreshing}
+                tableBusyMessage={websiteTableBusy}
                 websiteOperationKey={websiteOperationKey}
                 onRefresh={refreshWebsite}
                 onRefreshAll={refreshAllWebsites}
@@ -1050,7 +1117,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
           onClose={() => setEditing(null)}
           onSaved={async () => {
             setEditing(null);
-            await loadDashboard();
+            await loadDashboard({ soft: true });
           }}
         />
       )}
@@ -1059,7 +1126,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
         <WebsiteProvisionDrawer
           onClose={() => setProvisioningOpen(false)}
           onCreated={async () => {
-            await loadDashboard();
+            await loadDashboard({ soft: true });
             setNotice('Khởi tạo website hoàn tất và đã thêm vào danh sách giám sát.');
           }}
         />
@@ -1071,7 +1138,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
           onClose={() => setDeletingWebsite(null)}
           onDeleted={async () => {
             setDeletingWebsite(null);
-            await loadDashboard();
+            await loadDashboard({ soft: true });
             setNotice(`Đã xóa website ${deletingWebsite.domain} và các tài nguyên liên quan.`);
           }}
         />
@@ -1159,16 +1226,39 @@ function MetricCard({ icon, label, value, sub, tone, percent }) {
   );
 }
 
-function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshing, websiteOperationKey, onRefresh, onRefreshAll, onRunOperation, onEdit, onDelete, onCreate, onProvision, onDiscoverySync }) {
+function WebsitePanel({
+  setup,
+  websites,
+  refreshingId,
+  discovering,
+  bulkRefreshing,
+  tableBusyMessage,
+  websiteOperationKey,
+  onRefresh,
+  onRefreshAll,
+  onRunOperation,
+  onEdit,
+  onDelete,
+  onCreate,
+  onProvision,
+  onDiscoverySync,
+}) {
+  const tableLocked = Boolean(tableBusyMessage);
+  const headerBusy = bulkRefreshing || discovering;
+
   return (
     <section className="panel website-panel">
       <div className="panel-header">
+        <div>
+          <h2>Website đang giám sát</h2>
+          <p>Làm việc theo từng dòng cho thao tác riêng lẻ, và chỉ khóa trong phạm vi bảng khi chạy tác vụ toàn danh sách.</p>
+        </div>
         <div className="panel-actions">
-          <button className="ghost-button" onClick={() => onRefreshAll(false)} disabled={bulkRefreshing}>
+          <button className="ghost-button" onClick={() => onRefreshAll(false)} disabled={headerBusy}>
             {bulkRefreshing ? <Loader2 className="spin" size={16} /> : <Database size={16} />}
             Lấy số liệu tất cả
           </button>
-          <button className="ghost-button" onClick={onDiscoverySync} disabled={discovering}>
+          <button className="ghost-button" onClick={onDiscoverySync} disabled={headerBusy}>
             {discovering ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
             Quét multisite
           </button>
@@ -1177,8 +1267,9 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
         </div>
       </div>
 
-      <div className="website-table-wrap">
-        <table className="website-table">
+      <div className="website-table-region">
+        <div className="website-table-wrap">
+          <table className="website-table">
           <thead>
             <tr>
               <th className="sticky-col">Website</th>
@@ -1331,34 +1422,42 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
                   </td>
 
                   <td className="website-actions-cell">
-                    <div className="website-action-stack">
-                      <div className="website-action-inline">
-                        <button
-                          className="website-action-button"
-                          onClick={() => onRunOperation(site, 'clear-cache')}
-                          disabled={websiteOperationKey !== '' || !websiteHasEffectiveApiKey(site, setup)}
-                          title={websiteHasEffectiveApiKey(site, setup) ? 'Clear cache website này' : 'Website thiếu API key hiệu lực'}
-                        >
-                          {websiteOperationKey === `${site.id}:clear-cache` ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-                          Cache
-                        </button>
-                        <button
-                          className="website-action-button primary"
-                          onClick={() => onRunOperation(site, 'run-update')}
-                          disabled={websiteOperationKey !== '' || !websiteHasEffectiveApiKey(site, setup)}
-                          title={websiteHasEffectiveApiKey(site, setup) ? 'Chạy update.php cho website này' : 'Website thiếu API key hiệu lực'}
-                        >
-                          {websiteOperationKey === `${site.id}:run-update` ? <Loader2 className="spin" size={15} /> : <Play size={15} />}
-                          Update
-                        </button>
-                      </div>
-                      <div className="row-icon-actions">
-                        <button onClick={() => onRefresh(site.id)} title="Refresh">
-                          {refreshingId === site.id ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-                        </button>
-                        <button onClick={() => onEdit(site)} title="Sửa"><Save size={16} /></button>
-                        <button onClick={() => onDelete(site)} title="Xóa sạch website"><Trash2 size={16} /></button>
-                      </div>
+                    <div className="row-icon-actions website-row-actions">
+                      <IconActionButton
+                        title={websiteHasEffectiveApiKey(site, setup) ? 'Clear cache website này' : 'Website thiếu API key hiệu lực'}
+                        icon={<RefreshCw size={16} />}
+                        onClick={() => onRunOperation(site, 'clear-cache')}
+                        disabled={tableLocked || websiteOperationKey !== '' || !websiteHasEffectiveApiKey(site, setup)}
+                        busy={websiteOperationKey === `${site.id}:clear-cache`}
+                      />
+                      <IconActionButton
+                        title={websiteHasEffectiveApiKey(site, setup) ? 'Chạy update.php cho website này' : 'Website thiếu API key hiệu lực'}
+                        icon={<Play size={16} />}
+                        onClick={() => onRunOperation(site, 'run-update')}
+                        disabled={tableLocked || websiteOperationKey !== '' || !websiteHasEffectiveApiKey(site, setup)}
+                        busy={websiteOperationKey === `${site.id}:run-update`}
+                        tone="primary"
+                      />
+                      <IconActionButton
+                        title="Refresh số liệu website"
+                        icon={<Database size={16} />}
+                        onClick={() => onRefresh(site.id)}
+                        disabled={tableLocked || websiteOperationKey !== '' || refreshingId !== null}
+                        busy={refreshingId === site.id}
+                      />
+                      <IconActionButton
+                        title="Sửa website"
+                        icon={<Pencil size={16} />}
+                        onClick={() => onEdit(site)}
+                        disabled={tableLocked || websiteOperationKey !== '' || refreshingId !== null}
+                      />
+                      <IconActionButton
+                        title="Xóa sạch website"
+                        icon={<Trash2 size={16} />}
+                        onClick={() => onDelete(site)}
+                        disabled={tableLocked || websiteOperationKey !== '' || refreshingId !== null}
+                        tone="danger"
+                      />
                     </div>
                   </td>
                 </tr>
@@ -1366,6 +1465,16 @@ function WebsitePanel({ setup, websites, refreshingId, discovering, bulkRefreshi
             })}
           </tbody>
         </table>
+        </div>
+
+        {tableBusyMessage ? (
+          <div className="table-overlay">
+            <div className="table-overlay-card">
+              <Loader2 className="spin" size={18} />
+              <span>{tableBusyMessage}</span>
+            </div>
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -1562,7 +1671,9 @@ function WebsiteDrawer({ website, setup, onClose, onSaved }) {
 function WebsiteDeletionDrawer({ website, onClose, onDeleted }) {
   const [confirmation, setConfirmation] = useState('');
   const [runNow, setRunNow] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [creatingRun, setCreatingRun] = useState(false);
+  const [runningAll, setRunningAll] = useState(false);
+  const [activeStepKey, setActiveStepKey] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [currentRun, setCurrentRun] = useState(null);
@@ -1572,6 +1683,34 @@ function WebsiteDeletionDrawer({ website, onClose, onDeleted }) {
     ? Math.round((steps.filter((step) => step.status === 'success').length / steps.length) * 100)
     : 0;
   const canSubmit = confirmation === website.domain;
+  const busy = creatingRun || runningAll || Boolean(activeStepKey);
+
+  async function runSingleStep(runId, stepKey) {
+    setActiveStepKey(stepKey);
+    setCurrentRun((current) => (current?.id === runId ? patchRunStepState(current, stepKey, 'running') : current));
+
+    try {
+      const payload = await api(`/api/website-deletion/runs/${runId}/steps/${stepKey}`, { method: 'POST' });
+      setCurrentRun(payload.data);
+      return payload.data;
+    } finally {
+      setActiveStepKey('');
+    }
+  }
+
+  async function runStepsSequentially(run) {
+    let nextRun = run;
+    const remainingSteps = (run?.steps || []).filter((step) => step.status !== 'success');
+
+    for (const step of remainingSteps) {
+      nextRun = await runSingleStep(nextRun.id, step.key);
+      if (nextRun.status === 'failed' || nextRun.status === 'completed') {
+        break;
+      }
+    }
+
+    return nextRun;
+  }
 
   async function createDeletionRun(event) {
     event.preventDefault();
@@ -1580,7 +1719,7 @@ function WebsiteDeletionDrawer({ website, onClose, onDeleted }) {
       return;
     }
 
-    setBusy(true);
+    setCreatingRun(true);
     setError('');
     setNotice('');
     try {
@@ -1588,61 +1727,69 @@ function WebsiteDeletionDrawer({ website, onClose, onDeleted }) {
         method: 'POST',
         body: {
           confirmation,
-          run_now: runNow,
+          run_now: false,
         },
       });
       setCurrentRun(payload.data);
-      if (payload.data.status === 'completed') {
+      if (!runNow) {
+        setNotice(`Đã tạo deletion run cho ${website.domain}.`);
+        return;
+      }
+
+      setNotice(`Đã tạo deletion run cho ${website.domain}. Đang chạy từng bước xóa trên server...`);
+      setRunningAll(true);
+      const finalRun = await runStepsSequentially(payload.data);
+      if (finalRun.status === 'completed') {
         await onDeleted();
         return;
       }
-      if (payload.data.status === 'failed') {
-        setError(`Xóa website dừng ở bước lỗi. Kiểm tra log bên dưới rồi chạy lại bước lỗi.`);
-      } else {
-        setNotice(`Đã tạo deletion run cho ${website.domain}.`);
+      if (finalRun.status === 'failed') {
+        setError('Xóa website dừng ở bước lỗi. Kiểm tra log bên dưới rồi chạy lại bước lỗi.');
       }
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusy(false);
+      setCreatingRun(false);
+      setRunningAll(false);
     }
   }
 
   async function executeStep(stepKey) {
     if (!currentRun) return;
-    setBusy(true);
     setError('');
     setNotice('');
     try {
-      const payload = await api(`/api/website-deletion/runs/${currentRun.id}/steps/${stepKey}`, { method: 'POST' });
-      setCurrentRun(payload.data);
-      if (payload.data.status === 'completed') {
+      const nextRun = await runSingleStep(currentRun.id, stepKey);
+      if (nextRun.status === 'completed') {
         await onDeleted();
+        return;
+      }
+      if (nextRun.status === 'failed') {
+        setError('Xóa website dừng ở bước lỗi. Kiểm tra log bên dưới rồi chạy lại bước lỗi.');
       }
     } catch (err) {
       setError(err.message);
-    } finally {
-      setBusy(false);
     }
   }
 
   async function executeAll() {
     if (!currentRun) return;
-    setBusy(true);
+    setRunningAll(true);
     setError('');
     setNotice('');
     try {
-      const payload = await api(`/api/website-deletion/runs/${currentRun.id}/run-all`, { method: 'POST' });
-      setCurrentRun(payload.data);
-      if (payload.data.status === 'completed') {
+      const finalRun = await runStepsSequentially(currentRun);
+      if (finalRun.status === 'completed') {
         await onDeleted();
-      } else if (payload.data.status === 'failed') {
-        setError(`Xóa website dừng ở bước lỗi. Kiểm tra log bên dưới rồi chạy lại bước lỗi.`);
+        return;
+      }
+      if (finalRun.status === 'failed') {
+        setError('Xóa website dừng ở bước lỗi. Kiểm tra log bên dưới rồi chạy lại bước lỗi.');
       }
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusy(false);
+      setRunningAll(false);
     }
   }
 
@@ -1689,7 +1836,7 @@ function WebsiteDeletionDrawer({ website, onClose, onDeleted }) {
               <div className="panel-actions">
                 <ProvisionStatus status={currentRun.status} />
                 <button className="danger-button" type="button" onClick={executeAll} disabled={busy || currentRun.status === 'completed'}>
-                  {busy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+                  {runningAll ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
                   Chạy toàn bộ
                 </button>
               </div>
@@ -1720,7 +1867,7 @@ function WebsiteDeletionDrawer({ website, onClose, onDeleted }) {
                       onClick={() => executeStep(step.key)}
                       disabled={busy || step.status === 'running' || step.status === 'success' || currentRun.status === 'completed'}
                     >
-                      {busy && currentRun.current_step === step.key ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+                      {activeStepKey === step.key ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
                       {step.status === 'failed' ? 'Chạy lại bước lỗi' : (step.status === 'success' ? 'Đã xong' : 'Chạy bước này')}
                     </button>
                   </div>
@@ -1738,7 +1885,9 @@ function WebsiteDeletionDrawer({ website, onClose, onDeleted }) {
 
 function WebsiteProvisionDrawer({ onClose, onCreated }) {
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [creatingRun, setCreatingRun] = useState(false);
+  const [runningAll, setRunningAll] = useState(false);
+  const [activeStepKey, setActiveStepKey] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [defaults, setDefaults] = useState({
@@ -1764,6 +1913,7 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
   const [autoRun, setAutoRun] = useState(true);
   const [runs, setRuns] = useState([]);
   const [currentRun, setCurrentRun] = useState(null);
+  const busy = creatingRun || runningAll || Boolean(activeStepKey);
 
   async function loadRuns() {
     const payload = await api('/api/website-provision/runs');
@@ -1804,9 +1954,37 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
     }));
   }
 
+  async function runSingleStep(runId, stepKey) {
+    setActiveStepKey(stepKey);
+    setCurrentRun((current) => (current?.id === runId ? patchRunStepState(current, stepKey, 'running') : current));
+
+    try {
+      const payload = await api(`/api/website-provision/runs/${runId}/steps/${stepKey}`, { method: 'POST' });
+      setCurrentRun(payload.data);
+      await loadRuns();
+      return payload.data;
+    } finally {
+      setActiveStepKey('');
+    }
+  }
+
+  async function runStepsSequentially(run) {
+    let nextRun = run;
+    const remainingSteps = (run?.steps || []).filter((step) => step.status !== 'success');
+
+    for (const step of remainingSteps) {
+      nextRun = await runSingleStep(nextRun.id, step.key);
+      if (nextRun.status === 'failed' || nextRun.status === 'completed') {
+        break;
+      }
+    }
+
+    return nextRun;
+  }
+
   async function createRun(event) {
     event.preventDefault();
-    setBusy(true);
+    setCreatingRun(true);
     setError('');
     setNotice('');
 
@@ -1819,62 +1997,65 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
         return;
       }
 
-      setNotice(`Đã tạo provisioning run cho ${payload.data.full_domain}. Đang chạy toàn bộ các bước trên server...`);
-      const runPayload = await api(`/api/website-provision/runs/${payload.data.id}/run-all`, { method: 'POST' });
-      setCurrentRun(runPayload.data);
-      await loadRuns();
-      if (runPayload.data.status === 'completed') {
-        setNotice(`Website ${runPayload.data.full_domain} đã khởi tạo xong.`);
+      setNotice(`Đã tạo provisioning run cho ${payload.data.full_domain}. Đang chạy từng bước trên server...`);
+      setRunningAll(true);
+      const finalRun = await runStepsSequentially(payload.data);
+      if (finalRun.status === 'completed') {
+        setNotice(`Website ${finalRun.full_domain} đã khởi tạo xong.`);
         await onCreated();
-      } else if (runPayload.data.status === 'failed') {
-        setError(`Khởi tạo website dừng ở bước lỗi. Xem log trong run ${runPayload.data.full_domain}.`);
+        return;
+      }
+      if (finalRun.status === 'failed') {
+        setError(`Khởi tạo website dừng ở bước lỗi. Xem log trong run ${finalRun.full_domain}.`);
       }
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusy(false);
+      setCreatingRun(false);
+      setRunningAll(false);
     }
   }
 
   async function executeStep(stepKey) {
     if (!currentRun) return;
-    setBusy(true);
     setError('');
     setNotice('');
 
     try {
-      const payload = await api(`/api/website-provision/runs/${currentRun.id}/steps/${stepKey}`, { method: 'POST' });
-      setCurrentRun(payload.data);
-      await loadRuns();
-      if (payload.data.status === 'completed') {
-        setNotice(`Website ${payload.data.full_domain} đã khởi tạo xong.`);
+      const nextRun = await runSingleStep(currentRun.id, stepKey);
+      if (nextRun.status === 'completed') {
+        setNotice(`Website ${nextRun.full_domain} đã khởi tạo xong.`);
         await onCreated();
+        return;
+      }
+      if (nextRun.status === 'failed') {
+        setError(`Khởi tạo website dừng ở bước lỗi. Xem log trong run ${nextRun.full_domain}.`);
       }
     } catch (err) {
       setError(err.message);
-    } finally {
-      setBusy(false);
     }
   }
 
   async function executeAll() {
     if (!currentRun) return;
-    setBusy(true);
+    setRunningAll(true);
     setError('');
     setNotice('');
 
     try {
-      const payload = await api(`/api/website-provision/runs/${currentRun.id}/run-all`, { method: 'POST' });
-      setCurrentRun(payload.data);
-      await loadRuns();
-      if (payload.data.status === 'completed') {
-        setNotice(`Website ${payload.data.full_domain} đã khởi tạo xong.`);
+      const finalRun = await runStepsSequentially(currentRun);
+      if (finalRun.status === 'completed') {
+        setNotice(`Website ${finalRun.full_domain} đã khởi tạo xong.`);
         await onCreated();
+        return;
+      }
+      if (finalRun.status === 'failed') {
+        setError(`Khởi tạo website dừng ở bước lỗi. Xem log trong run ${finalRun.full_domain}.`);
       }
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusy(false);
+      setRunningAll(false);
     }
   }
 
@@ -1909,7 +2090,7 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
           </div>
         </div>
 
-        {loading ? <FullPageLoader label="Đang nạp cấu hình provisioning..." /> : (
+        {loading ? <SectionLoader label="Đang nạp cấu hình provisioning..." /> : (
           <>
             {error && <div className="error-box wide">{error}</div>}
             {notice && <div className="success-box wide">{notice}</div>}
@@ -1931,7 +2112,7 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
                   {form.subdomain && form.parent_domain ? <small>Website sẽ tạo: <strong>{form.subdomain}.{form.parent_domain}</strong></small> : <small>Điền subdomain và domain cha để tạo website.</small>}
                 </div>
                 <button className="primary-button" disabled={busy}>
-                  {busy ? <Loader2 className="spin" size={16} /> : <Plus size={16} />}
+                  {creatingRun ? <Loader2 className="spin" size={16} /> : <Plus size={16} />}
                   {autoRun ? 'Tạo website ngay' : 'Tạo provisioning run'}
                 </button>
               </div>
@@ -1947,7 +2128,7 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
                   <div className="panel-actions">
                     <ProvisionStatus status={currentRun.status} />
                     <button className="primary-button" type="button" onClick={executeAll} disabled={busy || currentRun.status === 'completed'}>
-                      {busy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+                      {runningAll ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
                       Chạy toàn bộ
                     </button>
                   </div>
@@ -1982,7 +2163,7 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
                           onClick={() => executeStep(step.key)}
                           disabled={busy || step.status === 'running' || step.status === 'success' || currentRun.status === 'completed'}
                         >
-                          {busy && currentRun.current_step === step.key ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+                          {activeStepKey === step.key ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
                           {step.status === 'failed' ? 'Chạy lại bước lỗi' : (step.status === 'success' ? 'Đã xong' : 'Chạy bước này')}
                         </button>
                       </div>
@@ -2026,7 +2207,7 @@ function WebsiteProvisionDrawer({ onClose, onCreated }) {
                         <td><strong>{run.source_database}</strong></td>
                         <td><small>{run.created_at ? new Date(run.created_at).toLocaleString('vi-VN') : 'N/A'}</small></td>
                         <td className="row-actions">
-                          <button type="button" onClick={() => selectRun(run)} title="Xem run"><Save size={16} /></button>
+                          <IconActionButton title="Xem run" icon={<Eye size={16} />} onClick={() => selectRun(run)} />
                         </td>
                       </tr>
                     ))}
