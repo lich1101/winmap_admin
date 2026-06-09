@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\MonitoredWebsite;
 use App\Services\ByteFormatter;
+use App\Services\DrupalMaintenanceService;
 use App\Services\DrupalSiteDiscoveryService;
 use App\Services\DrupalUsageClient;
 use Illuminate\Http\JsonResponse;
@@ -78,19 +79,19 @@ class MonitoredWebsiteController extends Controller
         ]);
     }
 
-    public function clearCache(MonitoredWebsite $website, DrupalUsageClient $client): JsonResponse
+    public function clearCache(MonitoredWebsite $website, DrupalMaintenanceService $maintenance): JsonResponse
     {
         try {
-            return $this->operationResponse($website, $client->clearCache($website));
+            return $this->operationResponse($website, $maintenance->clearCache($website));
         } catch (\Throwable $e) {
             return $this->operationErrorResponse($website, $e);
         }
     }
 
-    public function runUpdate(MonitoredWebsite $website, DrupalUsageClient $client): JsonResponse
+    public function runUpdate(MonitoredWebsite $website, DrupalMaintenanceService $maintenance): JsonResponse
     {
         try {
-            return $this->operationResponse($website, $client->runUpdate($website));
+            return $this->operationResponse($website, $maintenance->runUpdate($website));
         } catch (\Throwable $e) {
             return $this->operationErrorResponse($website, $e);
         }

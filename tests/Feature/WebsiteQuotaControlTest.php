@@ -631,7 +631,7 @@ HTML;
         $this->assertTrue($website->uses_default_credentials);
     }
 
-    public function test_admin_can_run_remote_operation_with_setup_default_api_key(): void
+    public function test_admin_can_run_remote_clear_cache_via_ssh_drush(): void
     {
         SetupConfiguration::query()->create([
             'is_completed' => true,
@@ -650,17 +650,28 @@ HTML;
             'domain' => 'enter.winmap.vn',
             'usage_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/json',
             'config_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/quota/config',
+            'discovery_root' => '/srv/www/winmap/sites/enter.winmap.vn/settings.php',
             'enabled' => true,
             'quota_bytes' => 1024 * 1024 * 1024,
             'warning_threshold_percent' => 85,
         ]);
 
-        Http::fake([
-            'https://enter.winmap.vn/application/site-usage/cache/clear' => Http::response([
-                'status' => 'success',
-                'message' => 'Cache cleared.',
-            ], 200),
-        ]);
+        $remote = Mockery::mock(RemoteServerService::class);
+        $remote->shouldReceive('runManagedShellScript')
+            ->once()
+            ->withArgs(function ($setup, $script, $args, $timeout) {
+                return $setup instanceof SetupConfiguration
+                    && $setup->server_host === '10.10.10.10'
+                    && $args === ['/srv/www/winmap', 'https://enter.winmap.vn']
+                    && $timeout === 180
+                    && str_contains($script, 'drush -y cc all --root="$ROOT" --uri="$SITE_URI"');
+            })
+            ->andReturn([
+                'stdout' => "Processing https://enter.winmap.vn\nCache cleared for https://enter.winmap.vn\n",
+                'stderr' => '',
+                'exit_code' => 0,
+            ]);
+        $this->app->instance(RemoteServerService::class, $remote);
 
         $admin = User::factory()->create([
             'role' => 'administrator',
@@ -671,12 +682,63 @@ HTML;
 
         $response->assertOk()
             ->assertJsonPath('status', 'success')
-            ->assertJsonPath('remote.message', 'Cache cleared.');
+            ->assertJsonPath('remote.message', 'Đã clear cache enter.winmap.vn qua SSH/drush.')
+            ->assertJsonPath('remote.project_path', '/srv/www/winmap')
+            ->assertJsonPath('remote.site_uri', 'https://enter.winmap.vn');
+    }
 
-        Http::assertSent(function ($request) {
-            return $request->url() === 'https://enter.winmap.vn/application/site-usage/cache/clear'
-                && (($request->header('X-Winmap-Site-Usage-Key')[0] ?? null) === 'shared-key-123');
-        });
+    public function test_admin_can_run_remote_update_via_ssh_drush(): void
+    {
+        SetupConfiguration::query()->create([
+            'is_completed' => true,
+            'server_host' => '10.10.10.10',
+            'server_port' => 22,
+            'server_username' => 'root',
+            'server_password' => 'secret',
+            'drupal_project_path' => '/srv/www/winmap',
+            'drupal_site_scheme' => 'https',
+            'auth_site_domain' => 'enter.winmap.vn',
+        ]);
+
+        $website = MonitoredWebsite::query()->create([
+            'name' => 'Enter',
+            'domain' => 'enter.winmap.vn',
+            'usage_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/json',
+            'config_endpoint_url' => 'https://enter.winmap.vn/application/site-usage/quota/config',
+            'enabled' => true,
+            'quota_bytes' => 1024 * 1024 * 1024,
+            'warning_threshold_percent' => 85,
+        ]);
+
+        $remote = Mockery::mock(RemoteServerService::class);
+        $remote->shouldReceive('runManagedShellScript')
+            ->once()
+            ->withArgs(function ($setup, $script, $args, $timeout) {
+                return $setup instanceof SetupConfiguration
+                    && $args === ['/srv/www/winmap', 'https://enter.winmap.vn']
+                    && $timeout === 600
+                    && str_contains($script, 'drush -y updb --root="$ROOT" --uri="$SITE_URI"')
+                    && str_contains($script, 'drush -y cc all --root="$ROOT" --uri="$SITE_URI"');
+            })
+            ->andReturn([
+                'stdout' => "Processing https://enter.winmap.vn\nDatabase updated for https://enter.winmap.vn\nCache cleared for https://enter.winmap.vn\n",
+                'stderr' => '',
+                'exit_code' => 0,
+            ]);
+        $this->app->instance(RemoteServerService::class, $remote);
+
+        $admin = User::factory()->create([
+            'role' => 'administrator',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->postJson("/api/websites/{$website->id}/run-update");
+
+        $response->assertOk()
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('remote.message', 'Đã chạy updb + clear cache enter.winmap.vn qua SSH/drush.')
+            ->assertJsonPath('remote.project_path', '/srv/www/winmap')
+            ->assertJsonPath('remote.site_uri', 'https://enter.winmap.vn');
     }
 
     public function test_setup_can_mix_shared_default_credential_with_site_override(): void

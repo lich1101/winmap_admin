@@ -111,6 +111,19 @@ function websiteHasEffectiveApiKey(site, setup) {
   return Boolean(site?.has_api_key || setup?.has_default_api_key);
 }
 
+function setupHasRemoteMaintenance(setup) {
+  return Boolean(setup?.server_host && setup?.server_username && setup?.drupal_project_path);
+}
+
+function websiteCanRunRemoteMaintenance(site, setup) {
+  return Boolean(
+    site?.enabled &&
+    site?.domain &&
+    setupHasRemoteMaintenance(setup) &&
+    ((site?.discovery_root || '').trim() || (setup?.drupal_project_path || '').trim())
+  );
+}
+
 function websiteCredentialSummary(site, setup) {
   return site?.uses_default_credentials ? 'Mặc định' : (site?.website_username || 'Riêng');
 }
@@ -187,9 +200,9 @@ const maintenanceOperations = {
   },
   'run-update': {
     route: 'run-update',
-    label: 'Chạy update.php',
-    runningLabel: 'Đang chạy update.php',
-    doneLabel: 'Đã chạy update.php',
+    label: 'Chạy updb + clear cache',
+    runningLabel: 'Đang chạy updb + clear cache',
+    doneLabel: 'Đã chạy updb + clear cache',
   },
 };
 
@@ -904,8 +917,8 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
     if (!config) {
       return;
     }
-    if (!websiteHasEffectiveApiKey(site, setup)) {
-      setError(`Website ${site.domain} chưa có API key hiệu lực để chạy thao tác này.`);
+    if (!websiteCanRunRemoteMaintenance(site, setup)) {
+      setError(`Website ${site.domain} chưa đủ cấu hình remote Drupal để chạy bảo trì qua SSH/drush.`);
       return;
     }
 
@@ -927,14 +940,14 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
 
   async function runMaintenanceBatch(operation) {
     const config = maintenanceOperations[operation];
-    const targets = websites.filter((site) => site.enabled && websiteHasEffectiveApiKey(site, setup));
-    const skipped = websites.filter((site) => site.enabled && !websiteHasEffectiveApiKey(site, setup)).length;
+    const targets = websites.filter((site) => websiteCanRunRemoteMaintenance(site, setup));
+    const skipped = websites.filter((site) => site.enabled && !websiteCanRunRemoteMaintenance(site, setup)).length;
 
     if (!config || maintenanceBatch.running) {
       return;
     }
     if (targets.length === 0) {
-      setError('Không có website nào đủ điều kiện chạy bảo trì. Cần bật website và có API key riêng hoặc API key mặc định trong setup.');
+      setError('Không có website nào đủ điều kiện chạy bảo trì. Cần cấu hình SSH server, path Drupal và domain website hợp lệ.');
       return;
     }
 
@@ -1006,7 +1019,7 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
       success,
       errors,
     }));
-    setNotice(`${config.doneLabel} ${targets.length} website: ${success} thành công, ${errors} lỗi${skipped ? `, bỏ qua ${skipped} site thiếu API key hiệu lực` : ''}.`);
+    setNotice(`${config.doneLabel} ${targets.length} website: ${success} thành công, ${errors} lỗi${skipped ? `, bỏ qua ${skipped} site thiếu cấu hình remote hợp lệ` : ''}.`);
     await loadDashboard({ soft: true });
   }
 
@@ -1148,8 +1161,8 @@ function Dashboard({ user, setup, onLogout, onOpenSetup }) {
 }
 
 function MaintenanceBatchPanel({ setup, websites, batch, onRun }) {
-  const readyCount = websites.filter((site) => site.enabled && websiteHasEffectiveApiKey(site, setup)).length;
-  const missingKeyCount = websites.filter((site) => site.enabled && !websiteHasEffectiveApiKey(site, setup)).length;
+  const readyCount = websites.filter((site) => websiteCanRunRemoteMaintenance(site, setup)).length;
+  const blockedCount = websites.filter((site) => site.enabled && !websiteCanRunRemoteMaintenance(site, setup)).length;
   const percent = batch.total > 0 ? Math.round((batch.currentIndex / batch.total) * 100) : 0;
   const activeConfig = maintenanceOperations[batch.operation];
 
@@ -1158,6 +1171,7 @@ function MaintenanceBatchPanel({ setup, websites, batch, onRun }) {
       <div className="panel-header compact">
         <div>
           <h2>Bảo trì hàng loạt</h2>
+          <p>Chạy trực tiếp qua SSH/drush theo đúng root multisite của từng website, giống script server đang vận hành.</p>
         </div>
         <Activity size={20} />
       </div>
@@ -1169,13 +1183,13 @@ function MaintenanceBatchPanel({ setup, websites, batch, onRun }) {
         </button>
         <button className="primary-button" onClick={() => onRun('run-update')} disabled={batch.running || readyCount === 0}>
           {batch.running && batch.operation === 'run-update' ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-          Chạy update.php
+          Chạy updb + clear cache
         </button>
       </div>
 
       <div className="batch-summary">
         <span>{readyCount} site sẵn sàng</span>
-        <span>{missingKeyCount} thiếu API key</span>
+        <span>{blockedCount} thiếu cấu hình remote</span>
       </div>
 
       <div className="batch-progress">
@@ -1351,7 +1365,7 @@ function WebsitePanel({
                       tooltip={(
                         <div className="cell-tooltip-stack">
                           <div><span>Nguồn</span><strong>{site.has_api_key ? 'API key riêng của website' : (setup?.has_default_api_key ? 'API key mặc định của hệ thống' : 'Chưa cấu hình API key')}</strong></div>
-                          <div><span>Khả năng</span><strong>{websiteHasEffectiveApiKey(site, setup) ? 'Dùng được cho quota sync và bảo trì từ xa' : 'Chưa đủ điều kiện quota sync hoặc bảo trì từ xa'}</strong></div>
+                          <div><span>Khả năng</span><strong>{websiteHasEffectiveApiKey(site, setup) ? 'Dùng được cho quota sync qua endpoint' : 'Chưa đủ điều kiện đồng bộ quota qua endpoint'}</strong></div>
                         </div>
                       )}
                     />
@@ -1424,17 +1438,17 @@ function WebsitePanel({
                   <td className="website-actions-cell">
                     <div className="row-icon-actions website-row-actions">
                       <IconActionButton
-                        title={websiteHasEffectiveApiKey(site, setup) ? 'Clear cache website này' : 'Website thiếu API key hiệu lực'}
+                        title={websiteCanRunRemoteMaintenance(site, setup) ? 'Clear cache website này qua SSH/drush' : 'Website thiếu cấu hình remote để clear cache'}
                         icon={<RefreshCw size={16} />}
                         onClick={() => onRunOperation(site, 'clear-cache')}
-                        disabled={tableLocked || websiteOperationKey !== '' || !websiteHasEffectiveApiKey(site, setup)}
+                        disabled={tableLocked || websiteOperationKey !== '' || !websiteCanRunRemoteMaintenance(site, setup)}
                         busy={websiteOperationKey === `${site.id}:clear-cache`}
                       />
                       <IconActionButton
-                        title={websiteHasEffectiveApiKey(site, setup) ? 'Chạy update.php cho website này' : 'Website thiếu API key hiệu lực'}
+                        title={websiteCanRunRemoteMaintenance(site, setup) ? 'Chạy updb + clear cache cho website này qua SSH/drush' : 'Website thiếu cấu hình remote để chạy update'}
                         icon={<Play size={16} />}
                         onClick={() => onRunOperation(site, 'run-update')}
-                        disabled={tableLocked || websiteOperationKey !== '' || !websiteHasEffectiveApiKey(site, setup)}
+                        disabled={tableLocked || websiteOperationKey !== '' || !websiteCanRunRemoteMaintenance(site, setup)}
                         busy={websiteOperationKey === `${site.id}:run-update`}
                         tone="primary"
                       />
@@ -1648,7 +1662,7 @@ function WebsiteDrawer({ website, setup, onClose, onSaved }) {
           <div className="info-strip">
             {isEdit
               ? (setup?.has_default_api_key
-                ? 'Nếu website dùng chung key hệ thống thì có thể bỏ trống API key riêng. Khi lưu, admin sẽ dùng key mặc định để đồng bộ quota xuống quota endpoint, gọi /api/admin/package-config và chạy bảo trì từ xa.'
+                ? 'Nếu website dùng chung key hệ thống thì có thể bỏ trống API key riêng. Khi lưu, admin sẽ dùng key mặc định để đồng bộ quota xuống quota endpoint và gọi `/api/admin/package-config`.'
                 : 'Khi lưu, admin sẽ đồng bộ dung lượng/user limit xuống `/application/site-usage/quota/config` và `/api/admin/package-config` của website.')
               : 'Với website mới, hãy ưu tiên dùng `Khởi tạo website` để chạy đủ các bước tạo subdomain, cấp SSL, copy code và clone DB. Form này mặc định chỉ lưu website vào admin; chỉ bật đồng bộ ngay nếu site đã có SSL và endpoint sẵn sàng.'}
           </div>
