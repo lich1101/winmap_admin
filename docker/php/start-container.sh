@@ -23,6 +23,10 @@ fi
 
 php artisan migrate --force
 
+if ! php artisan tinker --execute="echo \\App\\Models\\User::query()->where('role', 'administrator')->exists() ? 'yes' : 'no';" 2>/dev/null | grep -q yes; then
+  php artisan db:seed --force
+fi
+
 if [ ! -f public/build/manifest.json ]; then
   npm run build
 fi

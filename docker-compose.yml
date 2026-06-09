@@ -1,20 +1,20 @@
-# Typical host `.env` (this folder) for Compose variable substitution:
-#   APP_URL=https://administrator.winmap.vn
-#   WEB_PORT=8088
-#   WINMAP_BIND_SOURCE=../winmap_new
+# Winmap Admin — dùng MySQL chung của Campaio (app-mysql.campaio.site)
+# DB: winmap_admin trên campaiosite-mysql-1
 
 services:
   web:
     image: nginx:1.27-alpine
     container_name: winmap_admin_web
     ports:
-      - "${WEB_PORT:-8088}:80"
+      - "127.0.0.1:${WEB_PORT:-8088}:80"
     volumes:
       - ./docker/nginx/app.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       app:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - winmap
 
   app:
     build:
@@ -26,13 +26,13 @@ services:
       - path: .env
         required: false
     environment:
-      APP_URL: ${APP_URL:-http://localhost:8088}
+      APP_URL: ${APP_URL:-https://administrator.winmap.vn}
       DB_CONNECTION: mysql
-      DB_HOST: mysql
-      DB_PORT: 3306
+      DB_HOST: ${CAMPAIO_DB_HOST:-mysql}
+      DB_PORT: ${CAMPAIO_DB_PORT:-3306}
       DB_DATABASE: ${WINMAP_ADMIN_DB_DATABASE:-winmap_admin}
-      DB_USERNAME: ${WINMAP_ADMIN_DB_USERNAME:-winmap}
-      DB_PASSWORD: ${WINMAP_ADMIN_DB_PASSWORD:-winmap}
+      DB_USERNAME: ${CAMPAIO_DB_USER:-root}
+      DB_PASSWORD: ${CAMPAIO_DB_PASSWORD}
       DRUPAL_DISCOVERY_ROOTS: ${WINMAP_ADMIN_DRUPAL_DISCOVERY_ROOTS:-/workspace/winmap_new}
       DRUPAL_AUTH_PASSWORD_INC_PATH: ${WINMAP_ADMIN_DRUPAL_AUTH_PASSWORD_INC_PATH:-/workspace/winmap_new/includes/password.inc}
       TERMINAL_ALLOWED_ROOTS: ${WINMAP_ADMIN_TERMINAL_ALLOWED_ROOTS:-/var/www/html|/workspace/winmap_new}
@@ -40,15 +40,12 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - .:/var/www/html
-      - ${WINMAP_BIND_SOURCE:-../winmap_new}:/workspace/winmap_new:ro
+      - ${WINMAP_BIND_SOURCE:-./storage/empty-bind}:/workspace/winmap_new:ro
       - composer_cache:/tmp/composer-cache
       - vendor_data:/var/www/html/vendor
       - node_modules_data:/var/www/html/node_modules
     expose:
       - "8000"
-    depends_on:
-      mysql:
-        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/up >/dev/null || exit 1"]
       interval: 5s
@@ -57,31 +54,18 @@ services:
       start_period: 120s
     command: ["/usr/local/bin/winmap-admin-start"]
     restart: unless-stopped
+    networks:
+      - winmap
+      - campaiosite
 
-  mysql:
-    image: mysql:8.4
-    container_name: winmap_admin_mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
-      MYSQL_DATABASE: ${WINMAP_ADMIN_DB_DATABASE:-winmap_admin}
-      MYSQL_USER: ${WINMAP_ADMIN_DB_USERNAME:-winmap}
-      MYSQL_PASSWORD: ${WINMAP_ADMIN_DB_PASSWORD:-winmap}
-    command:
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_unicode_ci
-    volumes:
-      - mysql_data:/var/lib/mysql
-    ports:
-      - "${MYSQL_FORWARD_PORT:-33067}:3306"
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    restart: unless-stopped
+networks:
+  winmap:
+    driver: bridge
+  campaiosite:
+    external: true
+    name: campaiosite_default
 
 volumes:
-  mysql_data:
   composer_cache:
   vendor_data:
   node_modules_data:
