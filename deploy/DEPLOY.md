@@ -24,6 +24,29 @@ cd /var/www/winmap_admin
 bash deploy/deploy.sh
 ```
 
+## Rebuild hàng loạt (cùng môi trường Campaio + Winmap)
+
+```bash
+# Rebuild tất cả stack Docker chung
+bash /var/www/campaio.site/campaio.site/scripts/rebuild-shared-env.sh
+
+# Rebuild + dọn image/container cũ (giữ nguyên volume/DB)
+bash /var/www/campaio.site/campaio.site/scripts/rebuild-shared-env.sh --optimize
+
+# Chỉ restart nhanh, không build lại image
+bash /var/www/campaio.site/campaio.site/scripts/rebuild-shared-env.sh --quick
+
+# Chỉ một stack
+bash /var/www/campaio.site/campaio.site/scripts/rebuild-shared-env.sh --campaio-only
+bash /var/www/campaio.site/campaio.site/scripts/rebuild-shared-env.sh --winmap-only
+
+# Chỉ một service
+bash /var/www/campaio.site/campaio.site/scripts/rebuild-shared-env.sh --list
+bash /var/www/campaio.site/campaio.site/scripts/rebuild-shared-env.sh tenant-backend
+bash /var/www/campaio.site/campaio.site/scripts/rebuild-shared-env.sh --service winmap-app
+bash /var/www/campaio.site/campaio.site/scripts/rebuild-shared-env.sh admin-frontend --quick
+```
+
 ## Tạo database lần đầu (trên MySQL Campaio)
 
 ```bash

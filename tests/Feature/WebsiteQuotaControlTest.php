@@ -664,7 +664,8 @@ HTML;
                     && $setup->server_host === '10.10.10.10'
                     && $args === ['/srv/www/winmap', 'https://enter.winmap.vn']
                     && $timeout === 180
-                    && str_contains($script, 'drush -y cc all --root="$ROOT" --uri="$SITE_URI"');
+                    && str_contains($script, 'run_drush -y cc all --root="$ROOT" --uri="$SITE_URI"')
+                    && str_contains($script, 'resolve_php');
             })
             ->andReturn([
                 'stdout' => "Processing https://enter.winmap.vn\nCache cleared for https://enter.winmap.vn\n",
@@ -717,8 +718,9 @@ HTML;
                 return $setup instanceof SetupConfiguration
                     && $args === ['/srv/www/winmap', 'https://enter.winmap.vn']
                     && $timeout === 600
-                    && str_contains($script, 'drush -y updb --root="$ROOT" --uri="$SITE_URI"')
-                    && str_contains($script, 'drush -y cc all --root="$ROOT" --uri="$SITE_URI"');
+                    && str_contains($script, 'run_drush -y updb --root="$ROOT" --uri="$SITE_URI"')
+                    && str_contains($script, 'run_drush -y cc all --root="$ROOT" --uri="$SITE_URI"')
+                    && str_contains($script, 'resolve_php');
             })
             ->andReturn([
                 'stdout' => "Processing https://enter.winmap.vn\nDatabase updated for https://enter.winmap.vn\nCache cleared for https://enter.winmap.vn\n",

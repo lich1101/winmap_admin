@@ -133,102 +133,118 @@ class DrupalMaintenanceService
         };
     }
 
-    private function clearCacheScript(): string
+    private function drushShellBootstrap(): string
     {
         return <<<'SH'
-set -eu
-export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-ROOT="$1"
-SITE_URI="$2"
-
-resolve_drush() {
-  if command -v drush >/dev/null 2>&1; then
-    command -v drush
-    return 0
-  fi
-
+resolve_php() {
   for candidate in \
-    /usr/local/bin/drush \
-    /usr/bin/drush \
-    /opt/plesk/php/8.3/bin/drush \
-    /opt/plesk/php/8.2/bin/drush \
-    /opt/plesk/php/8.1/bin/drush \
-    /root/.composer/vendor/bin/drush \
-    /var/www/vhosts/.composer/vendor/bin/drush
+    /opt/plesk/php/7.4/bin/php \
+    /opt/plesk/php/8.0/bin/php \
+    /opt/plesk/php/8.1/bin/php \
+    /opt/plesk/php/8.2/bin/php \
+    /opt/plesk/php/8.3/bin/php \
+    /opt/plesk/php/7.3/bin/php \
+    /opt/plesk/php/7.2/bin/php \
+    /usr/local/bin/php \
+    /usr/bin/php
   do
     if [ -x "$candidate" ]; then
-      printf '%s\n' "$candidate"
-      return 0
+      version="$("$candidate" -r 'echo PHP_VERSION_ID;' 2>/dev/null || echo 0)"
+      if [ "$version" -ge 70205 ]; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
     fi
   done
 
   return 1
 }
 
+resolve_drush() {
+  for candidate in \
+    /opt/plesk/php/7.4/bin/drush \
+    /opt/plesk/php/8.0/bin/drush \
+    /opt/plesk/php/8.1/bin/drush \
+    /opt/plesk/php/8.2/bin/drush \
+    /opt/plesk/php/8.3/bin/drush \
+    /usr/local/bin/drush \
+    /usr/bin/drush \
+    /root/.composer/vendor/bin/drush \
+    /var/www/vhosts/.composer/vendor/bin/drush
+  do
+    if [ -x "$candidate" ] || [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  if command -v drush >/dev/null 2>&1; then
+    command -v drush
+    return 0
+  fi
+
+  return 1
+}
+
+run_drush() {
+  PHP_BIN="$(resolve_php)" || {
+    echo "Không tìm thấy PHP >= 7.2.5 để chạy drush." >&2
+    exit 3
+  }
+
+  DRUSH_BIN="$(resolve_drush)" || {
+    echo "Không tìm thấy drush trên server." >&2
+    exit 3
+  }
+
+  # Drush/Composer có thể gọi lại "php" từ PATH; ưu tiên PHP đã chọn (tránh /usr/bin/php 5.4).
+  export PATH="$(dirname "$PHP_BIN"):$PATH"
+
+  "$PHP_BIN" "$DRUSH_BIN" "$@"
+}
+SH;
+    }
+
+    private function clearCacheScript(): string
+    {
+        return $this->drushShellBootstrap().<<<'SH'
+
+set -eu
+export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+ROOT="$1"
+SITE_URI="$2"
+
 if [ ! -d "$ROOT" ]; then
   echo "Drupal root does not exist: $ROOT" >&2
   exit 2
 fi
 
-DRUSH_BIN="$(resolve_drush)" || {
-  echo "Không tìm thấy drush trên server." >&2
-  exit 3
-}
-
 cd "$ROOT"
 echo "Processing $SITE_URI"
-"$DRUSH_BIN" -y cc all --root="$ROOT" --uri="$SITE_URI"
+run_drush -y cc all --root="$ROOT" --uri="$SITE_URI"
 echo "Cache cleared for $SITE_URI"
 SH;
     }
 
     private function runUpdateScript(): string
     {
-        return <<<'SH'
+        return $this->drushShellBootstrap().<<<'SH'
+
 set -eu
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 ROOT="$1"
 SITE_URI="$2"
-
-resolve_drush() {
-  if command -v drush >/dev/null 2>&1; then
-    command -v drush
-    return 0
-  fi
-
-  for candidate in \
-    /usr/local/bin/drush \
-    /usr/bin/drush \
-    /opt/plesk/php/8.3/bin/drush \
-    /opt/plesk/php/8.2/bin/drush \
-    /opt/plesk/php/8.1/bin/drush \
-    /root/.composer/vendor/bin/drush \
-    /var/www/vhosts/.composer/vendor/bin/drush
-  do
-    if [ -x "$candidate" ]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-
-  return 1
-}
 
 if [ ! -d "$ROOT" ]; then
   echo "Drupal root does not exist: $ROOT" >&2
   exit 2
 fi
 
-DRUSH_BIN="$(resolve_drush)" || {
-  echo "Không tìm thấy drush trên server." >&2
-  exit 3
-}
-
 cd "$ROOT"
 echo "Processing $SITE_URI"
-"$DRUSH_BIN" -y updb --root="$ROOT" --uri="$SITE_URI"
+run_drush -y updb --root="$ROOT" --uri="$SITE_URI"
 echo "Database updated for $SITE_URI"
-"$DRUSH_BIN" -y cc all --root="$ROOT" --uri="$SITE_URI"
+run_drush -y cc all --root="$ROOT" --uri="$SITE_URI"
 echo "Cache cleared for $SITE_URI"
 SH;
     }
