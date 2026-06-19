@@ -44,7 +44,14 @@ ENV APP_KEY=base64:FKI7RrSNo9/q6YV99a0v2Q7YHc1Wm6YwKQ2w0eXpvwo=
 
 COPY . .
 
-RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader \
+RUN mkdir -p \
+      bootstrap/cache \
+      storage/framework/cache/data \
+      storage/framework/sessions \
+      storage/framework/views \
+      storage/logs \
+      storage/app/public \
+    && composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader \
     && npm ci --no-fund --no-audit \
     && npm run build \
     && rm -rf node_modules
