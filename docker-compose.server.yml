@@ -1,0 +1,74 @@
+# Winmap Admin production/staging runtime
+# Pull runtime images from GHCR by default; use docker-compose.server.build.yml as fallback build override.
+
+services:
+  web:
+    image: ${WINMAP_ADMIN_WEB_IMAGE:-ghcr.io/lich1101/winmap-admin-web:main}
+    container_name: winmap_admin_web
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8088}:80"
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - winmap
+
+  app:
+    image: ${WINMAP_ADMIN_APP_IMAGE:-ghcr.io/lich1101/winmap-admin-app:main}
+    container_name: winmap_admin_app
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    working_dir: /var/www/html
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_DEBUG: ${APP_DEBUG:-false}
+      APP_URL: ${APP_URL:-https://administrator.winmap.vn}
+      DB_CONNECTION: mysql
+      DB_HOST: ${CAMPAIO_DB_HOST:-mysql}
+      DB_PORT: ${CAMPAIO_DB_PORT:-3306}
+      DB_DATABASE: ${WINMAP_ADMIN_DB_DATABASE:-winmap_admin}
+      DB_USERNAME: ${CAMPAIO_DB_USER:-root}
+      DB_PASSWORD: ${CAMPAIO_DB_PASSWORD}
+      DRUPAL_DISCOVERY_ROOTS: ${WINMAP_ADMIN_DRUPAL_DISCOVERY_ROOTS:-/workspace/winmap_new}
+      DRUPAL_AUTH_PASSWORD_INC_PATH: ${WINMAP_ADMIN_DRUPAL_AUTH_PASSWORD_INC_PATH:-/workspace/winmap_new/includes/password.inc}
+      TERMINAL_ALLOWED_ROOTS: ${WINMAP_ADMIN_TERMINAL_ALLOWED_ROOTS:-/var/www/html|/workspace/winmap_new}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${WINMAP_BIND_SOURCE:-./storage/empty-bind}:/workspace/winmap_new:ro
+      - winmap_storage:/var/www/html/storage
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/up >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    command: ["/usr/local/bin/winmap-admin-start"]
+    restart: unless-stopped
+    networks:
+      - winmap
+      - campaiosite
+
+networks:
+  winmap:
+    driver: bridge
+  campaiosite:
+    external: true
+    name: campaiosite_default
+
+volumes:
+  winmap_storage:

@@ -1,0 +1,69 @@
+FROM php:8.3-cli-bookworm AS base
+
+ARG NODE_MAJOR=22
+
+RUN apt-get update && apt-get install -y \
+    git \
+    unzip \
+    zip \
+    curl \
+    ca-certificates \
+    gnupg \
+    default-mysql-client \
+    libicu-dev \
+    libonig-dev \
+    libxml2-dev \
+    libzip-dev \
+    libsqlite3-dev \
+    && docker-php-ext-install \
+      bcmath \
+      intl \
+      mbstring \
+      pcntl \
+      pdo_mysql \
+      pdo_sqlite \
+      zip \
+    && install -d -m 0755 /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www/html
+
+FROM base AS build
+
+ENV COMPOSER_ALLOW_SUPERUSER=1
+ENV APP_ENV=production
+ENV APP_DEBUG=false
+ENV APP_URL=http://localhost
+ENV APP_KEY=base64:FKI7RrSNo9/q6YV99a0v2Q7YHc1Wm6YwKQ2w0eXpvwo=
+
+COPY . .
+
+RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader \
+    && npm ci --no-fund --no-audit \
+    && npm run build \
+    && rm -rf node_modules
+
+FROM base AS runtime
+
+ENV APP_ENV=production
+ENV APP_DEBUG=false
+ENV APP_URL=https://administrator.winmap.vn
+
+COPY --from=build /var/www/html /var/www/html
+COPY docker/php/start-runtime.sh /usr/local/bin/winmap-admin-start
+
+RUN chmod +x /usr/local/bin/winmap-admin-start \
+    && mkdir -p /var/www/html/storage/framework/cache/data \
+      /var/www/html/storage/framework/sessions \
+      /var/www/html/storage/framework/views \
+      /var/www/html/storage/logs \
+      /var/www/html/storage/app/public \
+      /var/www/html/bootstrap/cache
+
+CMD ["/usr/local/bin/winmap-admin-start"]

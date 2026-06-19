@@ -1,0 +1,10 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile.server
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile

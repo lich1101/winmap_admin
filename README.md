@@ -281,6 +281,29 @@ docker compose exec app php artisan migrate
 docker compose down
 ```
 
+## Production image flow
+
+Production/staging should use prebuilt GHCR images instead of building directly on the server:
+
+- app: `ghcr.io/lich1101/winmap-admin-app:main`
+- web: `ghcr.io/lich1101/winmap-admin-web:main`
+- compose runtime: `docker-compose.server.yml`
+- server fallback build override: `docker-compose.server.build.yml`
+
+Deploy on the server:
+
+```bash
+cd /var/www/winmap_admin
+bash deploy/deploy.sh
+```
+
+Fallback when registry is unavailable:
+
+```bash
+cd /var/www/winmap_admin
+bash deploy/deploy.sh --build-on-server
+```
+
 ## Terminal security
 
 Default terminal commands are intentionally limited:
