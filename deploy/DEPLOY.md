@@ -15,7 +15,7 @@ Dự án **tách riêng** khỏi `campaio.site` về code & Docker app, nhưng *
 |---|---|
 | phpMyAdmin | https://app-mysql.campaio.site |
 | Database | `winmap_admin` |
-| Host (trong Docker) | `mysql` (mạng `campaiosite_default`) |
+| Host (trong Docker) | `mysql` (mạng `campaiosite_app_net`) |
 
 ## Deploy
 
@@ -93,4 +93,5 @@ WINMAP_ADMIN_APP_IMAGE=ghcr.io/lich1101/winmap-admin-app:main
 WINMAP_ADMIN_WEB_IMAGE=ghcr.io/lich1101/winmap-admin-web:main
 ```
 
-App container join mạng `campaiosite_default` để resolve hostname `mysql`.
+App container join mạng `campaiosite_app_net` để resolve hostname `mysql`.
+Có thể override bằng `CAMPAIO_SHARED_NETWORK` nếu stack Campaio trên server của bạn dùng network khác.

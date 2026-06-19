@@ -68,7 +68,7 @@ networks:
     driver: bridge
   campaiosite:
     external: true
-    name: campaiosite_default
+    name: ${CAMPAIO_SHARED_NETWORK:-campaiosite_app_net}
 
 volumes:
   winmap_storage:
